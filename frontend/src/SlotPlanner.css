@@ -1,0 +1,73 @@
+.planner {
+  background: white;
+  min-height: 100vh;
+  padding: 40px 0;
+  font-family: sans-serif;
+  width: 100%;
+}
+
+.planner__title {
+  font-size: 28px;
+  color: #686A76;
+  margin-bottom: 30px;
+  padding: 0 10px;
+}
+
+.planner__grid {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.planner__col {
+  background: white;
+  border: 1px solid black;
+  border-radius: 6px;
+  overflow: hidden;
+  width: 150px;
+}
+
+.planner__header {
+  background: #005470;
+  padding: 14px 20px;
+  font-size: 15px;
+  color: #fefefed0;
+  font-weight: bold;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid black;
+}
+
+.planner__header--center {
+  text-align: center;
+}
+
+.planner__header--right {
+  text-align: right;
+}
+
+.planner__cell {
+  padding: 16px 20px;
+  font-size: 14px;
+  border-bottom: 1px solid white;
+  color: black;
+}
+
+.planner__cell:last-child {
+  border-bottom: none;
+}
+
+.planner__cell--empty {
+  color: #ccc;
+}
+
+.planner__cell--center {
+  text-align: center;
+}
+
+.planner__cell--right {
+  text-align: right;
+}
+
+.planner__cell--bold {
+  font-weight: bold;
+}
