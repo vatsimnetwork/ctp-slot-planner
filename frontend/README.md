@@ -1,3 +1,9 @@
+# Update (14/03/26)
+Added the sanky diagram between the columns, as well as a way to manually edit the data. 
+
+# To-Do
+Change the sanky diagram to allow a one to many relationship, between the columns. 
+
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
