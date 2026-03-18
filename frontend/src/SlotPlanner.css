@@ -1,17 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;700&display=swap');
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
 .planner {
   background: white;
   min-height: 100vh;
   padding: 40px 0;
-  font-family: 'Ubuntu', sans-serif; 
+  font-family: 'Ubuntu', sans-serif;
   width: 100%;
-  box-sizing: border-box;
 }
 
 .planner__title {
   font-size: 28px;
-  color: black;
+  font-weight: 700;
+  color: #2A3B90;
   margin-bottom: 30px;
-  padding: 0 10px;
+  padding: 0 20px;
 }
 
 .planner__grid {
@@ -31,8 +39,8 @@
 
 .planner__col {
   background: white;
-  border: 1px solid black;
-  border-radius: 6px;
+  border: 1px solid #d0d7e8;
+  border-radius: 8px;
   overflow: hidden;
   width: 150px;
   position: relative;
@@ -40,13 +48,15 @@
 }
 
 .planner__header {
-  background: #2783C5 ;
+  background: #2A3B90;
   padding: 14px 20px;
-  font-size: 15px;
-  color: black;
-  font-weight: bold;
-  letter-spacing: 0.05em;
-  border-bottom: 1px solid black;
+  font-size: 13px;
+  font-weight: 700;
+  color: white;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid #1e2d7a;
+  height: 47px;
 }
 
 .planner__header--center {
@@ -60,16 +70,14 @@
 .planner__cell {
   padding: 16px 20px;
   font-size: 14px;
-  border-bottom: 1px solid black;
-  color: black;
+  font-weight: 400;
+  border-bottom: 1px solid #eef0f7;
+  color: #1a1a2e;
+  min-height: 53px;
 }
 
 .planner__cell:last-child {
   border-bottom: none;
-}
-
-.planner__cell--empty {
-  color: black;
 }
 
 .planner__cell--center {
@@ -80,36 +88,35 @@
   text-align: right;
 }
 
-.planner__cell--bold {
-  font-weight: bold;
-}
-
-.planner__cell-overlay {
+.planner__edit-overlay {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 100;
   background: white;
-  padding: 12px;
-  border-radius: 6px;
+  padding: 16px;
+  border-radius: 8px;
   border: 2px solid;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 24px rgba(42, 59, 144, 0.15);
 }
 
 .planner__edit-label {
-  font-size: 11px;
-  font-weight: bold;
-  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .planner__edit-input {
-  font-family: "Ubuntu", sans-serif;
+  font-family: 'Ubuntu', sans-serif;
   font-size: 14px;
-  border-radius: 3px;
-  padding: 2px 6px;
-  width: 80px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 4px 8px;
+  width: 90px;
   text-align: center;
   outline: none;
-  border: 1px solid;
+  border: 2px solid;
 }

@@ -1,8 +1,14 @@
-# Update (14/03/26)
-Added the sanky diagram between the columns, as well as a way to manually edit the data. 
+# Note to backend
+The data structure has changed — tracks are now nested under airport pairs, and each track needs three separate capacity objects (depToStart, startToEnd, endToArr) each with a value and cap, instead of the single value/cap.
+
+# Update (18/03/26)
+Added the one to many relationship for the sanky diagram
 
 # To-Do
-Change the sanky diagram to allow a one to many relationship, between the columns. 
+Make it look official, and connect up to backend/any other components. 
+
+# Completed
+Change the sanky diagram to allow a one to many relationship.
 
 # React + Vite
 
