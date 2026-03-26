@@ -177,6 +177,17 @@ export default function SlotPlanner() {
     return HEADER_H + rh * i + rh / 2;
   };
 
+  const [searchTerm, setSearchTerm] = useState("");
+  
+  const filteredConnections = connections.filter(c =>
+    c.dep.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.depRoute.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.track.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.arrRoute.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.arr.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+
   const getDepTime = (depId) => depTimes[depId] ?? startTime;
   const handleDepTimeChange = (depId, t) => {
     if (!isValidTime(t)) { addToast('Invalid time — use HHMMz (e.g. 1801z)', 'warning'); return; }
@@ -184,8 +195,8 @@ export default function SlotPlanner() {
   };
 
   const selectedDepConns = selectedDep
-    ? connections.filter(c => c.dep === selectedDep)
-    : [];
+    ? filteredConnections.filter(c => c.dep === selectedDep)
+      : filteredConnections;
 
   const connLabel = (conn) => {
     const idx = selectedDepConns.findIndex(c =>
@@ -399,6 +410,16 @@ export default function SlotPlanner() {
             Editing: <strong>{selectedDep}</strong>
           </div>
         )}
+
+        <div className="search-container">
+          <input
+            type="text"
+            placeholder="Search slots..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="search-input"
+          />
+        </div>
 
         <div className="planner__control-add">
           <select value={newRoute.dep}

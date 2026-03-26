@@ -17,8 +17,8 @@
   --accent-mid:       #3a4fa8;
   --accent-hover:     #1e2e78;
   --accent-subtle:    rgba(42,59,144,.09);
-  --green:            #18a960;
-  --green-hover:      #128a4d;
+  --green:            #29B473;
+  --green-hover:      #1ab861c9;
   --header-bg:        #2A3B90;
   --header-text:      #ffffff;
   --header-text-dim:  rgba(255,255,255,.65);
@@ -49,8 +49,8 @@
   --accent-mid:       #4a66f0;
   --accent-hover:     #3a56e0;
   --accent-subtle:    rgba(88,118,255,.14);
-  --green:            #22d474;
-  --green-hover:      #1ab860;
+  --green:            #29B473;
+  --green-hover:      #1ab861c9;
   --header-bg:        #192050;
   --header-text:      #e0e8ff;
   --header-text-dim:  rgba(200,215,255,.55);
@@ -71,7 +71,7 @@
   background: var(--bg);
   color: var(--text);
   font-family: 'Inter', 'Ubuntu', system-ui, sans-serif;
-  font-size: 24px;
+  font-size: 14px;
   min-height: 100vh;
   width: 100%;
   transition: background .18s, color .18s;
@@ -80,7 +80,7 @@
 .planner__loading {
   display: flex; align-items: center; justify-content: center;
   height: 100vh;
-  font-size: 15px; font-weight: 600; letter-spacing: .06em;
+  font-size: 14px; font-weight: 600; letter-spacing: .06em;
   color: var(--accent);
 }
 
@@ -230,7 +230,7 @@
 
 .planner__control-bar select,
 .planner__ctrl-num {
-  font-family: inherit; font-size: 13px; font-weight: 600; color: var(--text);
+  font-family: inherit; font-size: 14px; font-weight: 600; color: var(--text);
   background: var(--bg-card); border: 1.5px solid var(--border); border-radius: 6px;
   padding: 6px 10px; height: 33px; outline: none; cursor: pointer;
   transition: border-color .14s, box-shadow .14s;
@@ -338,7 +338,7 @@
 .planner__header {
   background: var(--header-bg);
   padding: 14px 16px;
-  font-size: 12px; font-weight: 700; color: var(--header-text);
+  font-size: 16px; font-weight: 700; color: var(--header-text);
   letter-spacing: .08em; text-transform: uppercase;
   height: 47px;
   border-radius: 10px 10px 0 0;
@@ -433,4 +433,17 @@
   border: 2px solid; border-radius: 5px;
   padding: 3px 6px; width: 62px; text-align: center; outline: none;
   background: var(--bg); color: var(--accent);
+}
+
+.search-container {
+  margin-bottom: 1rem;
+  width: 25%;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.5rem;
+  font-size: 1rem;
+  border-radius: 4px;
+  border: 1px solid #ccc;
 }
