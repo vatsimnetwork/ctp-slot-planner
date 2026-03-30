@@ -110,8 +110,8 @@ def get_sectors(eid: int = None):
     return _get(f"/events/{eid or _EVENT}/sectors")
 
 
-def patch_sector_slots(sector_id: int, maximum_slots: int):
-    return _patch(f"/sectors/{sector_id}/capacity", {"maximumSlots": maximum_slots})
+def patch_sector_capacity(sector_id: int, maximum_aircraft_per_hour: int):
+    return _patch(f"/sectors/{sector_id}/capacity", {"maximumAircraftPerHour": maximum_aircraft_per_hour})
 
 
 # ── Slot revisions ────────────────────────────────────────────────────────────

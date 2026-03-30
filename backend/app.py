@@ -129,19 +129,33 @@ def setup():
 
     tag_map = {}
     sector_map = {}
+    tag_to_routes = {}   # tag_name → [{identifier, routeSegmentGroup}]
+    sector_to_routes = {}  # sector_identifier → [{identifier, routeSegmentGroup}]
     for seg in route_segments:
         ident = (seg.get("identifier") or "").strip()
+        group = (seg.get("routeSegmentGroup") or "").strip()
         if not ident:
             continue
         tags = [t.get("tag") for t in (seg.get("tags") or []) if t.get("tag")]
         if tags:
             tag_map[ident] = tags
+            for tag in tags:
+                tag_to_routes.setdefault(tag, []).append({"identifier": ident, "routeSegmentGroup": group})
         pfp = seg.get("providedFacilityProgression") or []
         if pfp:
             sector_map[ident] = [
-                {"id": s["id"], "identifier": s["identifier"], "maximumSlots": s.get("maximumSlots") or 0}
+                {
+                    "id": s["id"],
+                    "identifier": s["identifier"],
+                    "maximumAircraftPerHour": s.get("maximumAircraftPerHour") or 65535,
+                }
                 for s in pfp if s.get("id")
             ]
+            for s in pfp:
+                if s.get("identifier"):
+                    sector_to_routes.setdefault(s["identifier"], []).append(
+                        {"identifier": ident, "routeSegmentGroup": group}
+                    )
 
     return jsonify({
         **derived,
@@ -152,6 +166,8 @@ def setup():
         "sectorMap": sector_map,
         "tagLimits": tag_limits,
         "sectorLimits": sector_limits,
+        "tagToRoutes": tag_to_routes,
+        "sectorToRoutes": sector_to_routes,
         "eventId": ctp_api.event_id(),
     })
 
@@ -487,7 +503,7 @@ def save_throughput_limits():
         if tag_limits:
             ctp_api.patch_tag_limits(tag_limits)
         for s in sector_updates:
-            ctp_api.patch_sector_slots(s["id"], s.get("maximumSlots", 0))
+            ctp_api.patch_sector_capacity(s["id"], s.get("maximumAircraftPerHour", 65535))
     except requests.HTTPError as e:
         return _ext_error(e)
     except requests.ConnectionError:

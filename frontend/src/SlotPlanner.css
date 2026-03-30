@@ -256,3 +256,25 @@
 .throughput-limits__search:focus { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-subtle); }
 .throughput-limits__search-clear { position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px; padding:2px 4px; line-height:1; }
 .throughput-limits__search-clear:hover { color:var(--text); }
+
+/* ── ThroughputLimitsPage enhancements ── */
+.tl-save-btn { position:fixed; bottom:24px; left:28px; z-index:50; }
+.tl-filters { display:flex; gap:8px; align-items:center; margin-bottom:10px; }
+.tl-filters .throughput-limits__search-wrap { flex:1; margin-bottom:0; }
+.tl-group-filter { font-family:inherit; font-size:13px; color:var(--text); background:var(--bg); border:1.5px solid var(--border); border-radius:7px; padding:5px 8px; outline:none; cursor:pointer; transition:border-color .14s; }
+.tl-group-filter:focus { border-color:var(--accent); }
+.tl-row { cursor:default; transition:background .1s; }
+.tl-row:hover { background:var(--bg-hover); }
+.tl-row--over td { background:rgba(239,68,68,.07) !important; }
+.tl-expand-col { width:20px; color:var(--text-muted); font-size:11px; padding-right:0 !important; }
+.tl-name { font-weight:600; }
+.tl-groups { font-size:12px; color:var(--text-muted); }
+.tl-slots { font-size:13px; color:var(--text-secondary); }
+.tl-subrow td { background:var(--bg-subtle); font-size:12px; color:var(--text-secondary); }
+.tl-subrow__name { font-weight:500; color:var(--text); padding-left:24px !important; }
+.tl-subrow__group { color:var(--text-muted); }
+.tl-usage-bar__wrap { display:flex; flex-direction:column; gap:3px; min-width:120px; }
+.tl-usage-bar { height:6px; background:var(--bg-subtle); border-radius:3px; overflow:hidden; }
+.tl-usage-bar::after { content:''; display:block; height:100%; width:var(--pct); background:var(--bar-color); border-radius:3px; transition:width .3s; }
+.tl-usage-val { font-size:11px; color:var(--text-muted); white-space:nowrap; }
+.tl-usage-val--over { color:var(--danger,#ef4444); font-weight:700; }
