@@ -336,6 +336,8 @@ export default function SlotPlanner() {
   const [pendingMode, setPendingMode] = useState(null);
   const [toasts,      setToasts]      = useState([]);
   const [isStaff,     setIsStaff]     = useState(false);
+  const [limitViolations, setLimitViolations] = useState([]); // [{kind, name, used, limit}]
+  const [showLimitModal,  setShowLimitModal]  = useState(false);
   const svgRef  = useRef(null);
   const gridRef = useRef(null);
   const editRef = useRef(null);
@@ -437,18 +439,25 @@ export default function SlotPlanner() {
         (tagMap[c.track] || []).forEach(tag => { tagUsage[tag] = (tagUsage[tag] || 0) + c.value; });
         (sectorMap[c.track] || []).forEach(s => { sectorUsage[s.identifier] = (sectorUsage[s.identifier] || 0) + c.value; });
       });
+      const violations = [];
       tagLimits.forEach(tl => {
         if (!tl.maximumAircraftPerHour) return;
         const limit = Math.floor(tl.maximumAircraftPerHour * departureHours);
         const used = tagUsage[tl.tag] || 0;
-        if (used > limit) addToast(`Tag limit exceeded: ${tl.tag} (${used}/${limit} slots)`, 'warning');
+        if (used > limit) violations.push({ kind: 'Tag', name: tl.tag, used, limit });
       });
       sectorLimits.forEach(s => {
         if (!s.maximumSlots) return;
         const used = sectorUsage[s.identifier] || 0;
-        if (used > s.maximumSlots) addToast(`Sector limit exceeded: ${s.identifier} (${used}/${s.maximumSlots} slots)`, 'warning');
+        if (used > s.maximumSlots) violations.push({ kind: 'Sector', name: s.identifier, used, limit: s.maximumSlots });
       });
-    }, 800);
+      const prev = limitViolations;
+      setLimitViolations(violations);
+      // Only pop the modal when new violations appear (not already shown).
+      if (violations.length > 0 && violations.some(v => !prev.find(p => p.kind === v.kind && p.name === v.name))) {
+        setShowLimitModal(true);
+      }
+    }, 600);
     return () => { if (warnTimer.current) clearTimeout(warnTimer.current); };
   }, [connections]);
 
@@ -703,6 +712,37 @@ export default function SlotPlanner() {
       )}
       {showModal && <SimParamsModal mode={pendingMode} params={simParams} onParamsChange={setSimParams} onConfirm={confirmSubmit} onClose={()=>setShowModal(false)}/>}
 
+      {showLimitModal && (
+        <div className="modal-overlay" onClick={()=>setShowLimitModal(false)}>
+          <div className="modal-box modal-box--limit-warning" onClick={e=>e.stopPropagation()}>
+            <div className="modal-header modal-header--danger">
+              <span className="modal-title">⚠ Throughput Limits Exceeded</span>
+              <button className="modal-close" onClick={()=>setShowLimitModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p className="limit-warning__intro">The following limits are exceeded by the current route plan. The simulator will be unable to allocate all requested slots.</p>
+              <table className="limit-warning__table">
+                <thead><tr><th>Type</th><th>Name</th><th>Used</th><th>Limit</th><th>Over by</th></tr></thead>
+                <tbody>
+                  {limitViolations.map((v,i) => (
+                    <tr key={i} className="limit-warning__row">
+                      <td>{v.kind}</td>
+                      <td><strong>{v.name}</strong></td>
+                      <td className="limit-warning__used">{v.used}</td>
+                      <td>{v.limit}</td>
+                      <td className="limit-warning__over">+{v.used - v.limit}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="modal-footer">
+              <button className="planner__btn planner__btn--destructive" onClick={()=>setShowLimitModal(false)}>I understand — dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="planner__toasts">
         {toasts.map(t=>(
           <div key={t.id} className={`planner__toast planner__toast--${t.type}`}>
@@ -734,6 +774,11 @@ export default function SlotPlanner() {
           {simStatus === 'sim_responded'&& <span className="planner__sim-status planner__sim-status--saving">Saving slot times…</span>}
           {simStatus === 'saved'        && <span className="planner__sim-status planner__sim-status--done">Finalizing…</span>}
           {!isStaff && <span className="planner__readonly-badge">Read-only</span>}
+          {limitViolations.length > 0 && (
+            <button className="planner__limit-alert" onClick={()=>setShowLimitModal(true)}>
+              ⚠ {limitViolations.length} limit{limitViolations.length > 1 ? 's' : ''} exceeded
+            </button>
+          )}
           <button disabled={!isStaff} className="planner__btn" onClick={()=>{setPendingMode('calculate');setShowConfirm(true);}}>Calculate Slots</button>
           <button disabled={!isStaff} className="planner__btn planner__btn--sim" onClick={()=>{setPendingMode('simulate');setShowModal(true);}}>Simulate Slots</button>
           <a href={`${import.meta.env.BASE_URL}logout/`} className="planner__btn planner__btn--logout">Logout</a>

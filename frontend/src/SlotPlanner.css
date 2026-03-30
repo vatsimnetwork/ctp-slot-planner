@@ -212,6 +212,25 @@
 /* ── Read-only badge ── */
 .planner__readonly-badge { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); background:var(--bg-hover); border:1px solid var(--border); border-radius:5px; padding:3px 9px; user-select:none; }
 
+/* ── Limit exceeded alert button (topbar) ── */
+.planner__limit-alert { font-size:12px; font-weight:700; letter-spacing:.04em; color:#fff; background:#b91c1c; border:none; border-radius:6px; padding:5px 12px; cursor:pointer; animation:limit-pulse 1.4s ease-in-out infinite; white-space:nowrap; }
+.planner__limit-alert:hover { background:#991b1b; animation:none; }
+@keyframes limit-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(185,28,28,.55)} 50%{box-shadow:0 0 0 7px rgba(185,28,28,0)} }
+
+/* ── Limit warning modal ── */
+.modal-box--limit-warning { width:min(640px,96vw); }
+.modal-header--danger { background:#b91c1c; border-radius:12px 12px 0 0; border-bottom-color:#991b1b; }
+.modal-header--danger .modal-title { color:#fff; font-size:17px; }
+.modal-header--danger .modal-close { color:rgba(255,255,255,.8); }
+.modal-header--danger .modal-close:hover { background:rgba(255,255,255,.15); color:#fff; }
+.limit-warning__intro { font-size:14px; color:var(--text-secondary); line-height:1.5; }
+.limit-warning__table { width:100%; border-collapse:collapse; font-size:13px; margin-top:4px; }
+.limit-warning__table th { text-align:left; font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--text-muted); padding:6px 10px; border-bottom:2px solid var(--border); }
+.limit-warning__table td { padding:9px 10px; border-bottom:1px solid var(--border-subtle); }
+.limit-warning__table tr:last-child td { border-bottom:none; }
+.limit-warning__used { font-weight:700; color:var(--toast-err-tx); }
+.limit-warning__over { font-weight:800; color:var(--toast-err-tx); }
+
 /* ── Tabs ── */
 .planner__tabs { display:flex; align-items:center; gap:4px; }
 .planner__tab { background:transparent; border:none; border-radius:6px; padding:6px 14px; font-family:inherit; font-size:14px; font-weight:600; color:var(--text-muted); cursor:pointer; transition:background .12s,color .12s; }
