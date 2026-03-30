@@ -429,18 +429,8 @@ def health():
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _split_slot_id(id_str):
-    if '|' in id_str:
-        parts = id_str.split('|')
-        return parts if len(parts) == 5 else None
-    # Legacy: split on the first 4 hyphens
-    parts, s = [], id_str
-    for _ in range(4):
-        idx = s.find('-')
-        if idx < 0:
-            return None
-        parts.append(s[:idx])
-        s = s[idx + 1:]
-    parts.append(s)
+    parts = id_str.split('|')
+    return parts if len(parts) == 5 else None
     return parts
 
 
@@ -497,11 +487,14 @@ def _generate_slots_from_groups(slot_groups: list, db_ids: dict) -> list:
 
 
 def _derive_slot_groups_from_slots(slots: list, route_segments: list, airports: list) -> list:
-    # Build airport identifier set (upper-cased)
-    airport_icaos = {
-        (a.get("waypoint", {}).get("identifier") or a.get("identifier", "")).strip().upper()
-        for a in (airports or [])
-    }
+    # Build airport identifier lookup by DB id (no waypoint preload needed)
+    airport_icao_by_id = {}
+    airport_icaos = set()
+    for a in (airports or []):
+        icao = (a.get("waypoint", {}).get("identifier") or a.get("identifier", "")).strip().upper()
+        if icao and a.get("id"):
+            airport_icao_by_id[a["id"]] = icao
+            airport_icaos.add(icao)
 
     def _norm(v):
         return (v or "").strip().upper()
@@ -525,10 +518,10 @@ def _derive_slot_groups_from_slots(slots: list, route_segments: list, airports: 
             return "dep"
         if _last_fix(seg) in airport_icaos:
             return "arr"
-        # Fallback: treat as dep if unclassifiable
         return "dep"
 
     # Build a classification cache keyed by route segment DB id
+    # (uses the fully-populated route_segments list, not the stub data on slots)
     rs_class_by_id = {}
     for rs in (route_segments or []):
         if rs.get("id"):
@@ -537,18 +530,15 @@ def _derive_slot_groups_from_slots(slots: list, route_segments: list, airports: 
     counts: dict = {}
 
     for slot in (slots or []):
-        dep_icao = _norm(
-            slot.get("departureAirport", {}).get("waypoint", {}).get("identifier", "")
-        )
-        arr_icao = _norm(
-            slot.get("arrivalAirport", {}).get("waypoint", {}).get("identifier", "")
-        )
+        # Use the direct airport ID fields — no nested waypoint preload required
+        dep_icao = airport_icao_by_id.get(slot.get("departureAirportId"))
+        arr_icao = airport_icao_by_id.get(slot.get("arrivalAirportId"))
         if not dep_icao or not arr_icao:
             continue
 
-        dep_route_id  = None
-        track_id      = None
-        arr_route_id  = None
+        dep_route_id = None
+        track_id     = None
+        arr_route_id = None
 
         for rs in (slot.get("routeSegments") or []):
             rs_id = rs.get("id")
@@ -556,11 +546,8 @@ def _derive_slot_groups_from_slots(slots: list, route_segments: list, airports: 
                 continue
             info = rs_class_by_id.get(rs_id)
             if not info:
-                # Fall back to classifying inline if not pre-built (should not happen)
-                kind = _classify(rs)
-                ident = (rs.get("identifier") or "").strip()
-            else:
-                kind, ident = info
+                continue
+            kind, ident = info
 
             if kind == "dep" and dep_route_id is None:
                 dep_route_id = ident

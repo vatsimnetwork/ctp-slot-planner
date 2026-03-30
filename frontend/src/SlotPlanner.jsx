@@ -43,23 +43,10 @@ const API = {
 };
 
 // ─── ID parser ────────────────────────────────────────────────────────────────
-// New IDs use '|' as separator to avoid ambiguity with route segment identifiers
-// that contain hyphens.  Legacy IDs (stored before this change) still use the
-// first-4-hyphen split for backward compatibility.
 function splitSlotId(id) {
-  if (id.includes('|')) {
-    const parts = id.split('|');
-    if (parts.length !== 5) { console.warn('[SlotPlanner] Bad ID:', id); return null; }
-    return parts;
-  }
-  // Legacy: split on the first 4 hyphens
-  const parts = []; let str = id;
-  for (let i = 0; i < 4; i++) {
-    const idx = str.indexOf('-');
-    if (idx < 0) { console.warn('[SlotPlanner] Bad ID:', id); return null; }
-    parts.push(str.slice(0, idx)); str = str.slice(idx + 1);
-  }
-  parts.push(str); return parts;
+  const parts = id.split('|');
+  if (parts.length !== 5) { console.warn('[SlotPlanner] Bad ID:', id); return null; }
+  return parts;
 }
 
 // ─── Parse slot groups into display data ─────────────────────────────────────
