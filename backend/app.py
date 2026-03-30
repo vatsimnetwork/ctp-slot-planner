@@ -117,7 +117,42 @@ def setup():
     except Exception:
         routes_revision = None
 
-    return jsonify({**derived, "routesRevision": routes_revision, "isStaff": is_staff, "syncTime": _from_api_time(event.get("departureTimeWindowOffsetSynchronizationTimeOfDay", "16:00:00")) if event else "1600z"})
+    try:
+        tag_limits = ctp_api.get_tag_limits()
+    except Exception:
+        tag_limits = []
+
+    try:
+        sector_limits = ctp_api.get_sectors()
+    except Exception:
+        sector_limits = []
+
+    tag_map = {}
+    sector_map = {}
+    for seg in route_segments:
+        ident = (seg.get("identifier") or "").strip()
+        if not ident:
+            continue
+        tags = [t.get("tag") for t in (seg.get("tags") or []) if t.get("tag")]
+        if tags:
+            tag_map[ident] = tags
+        pfp = seg.get("providedFacilityProgression") or []
+        if pfp:
+            sector_map[ident] = [
+                {"id": s["id"], "identifier": s["identifier"], "maximumSlots": s.get("maximumSlots") or 0}
+                for s in pfp if s.get("id")
+            ]
+
+    return jsonify({
+        **derived,
+        "routesRevision": routes_revision,
+        "isStaff": is_staff,
+        "syncTime": _from_api_time(event.get("departureTimeWindowOffsetSynchronizationTimeOfDay", "16:00:00")) if event else "1600z",
+        "tagMap": tag_map,
+        "sectorMap": sector_map,
+        "tagLimits": tag_limits,
+        "sectorLimits": sector_limits,
+    })
 
 
 # ─── /slotgroups/ ─────────────────────────────────────────────────────────────
@@ -277,7 +312,8 @@ def _submit_simulate(body: dict):
     2. Generate actual slot records from those groups.
     3. Create a new slot revision and populate it with the actual slots.
     4. Call simulate_slots (uses the newly created latest revision).
-    5. Create another new revision as draft for continued editing.
+       Go will update slot times and create a draft revision in the same transaction.
+    5. If Go returned a draftRevisionNumber, use it; otherwise create the draft here.
     Returns (slot_groups, caps, new_planner_revisions).
     """
     caps = body.get("caps", {})
@@ -311,24 +347,30 @@ def _submit_simulate(body: dict):
     # remains in a consistent state. The warning is surfaced to the frontend.
     sim_warning = None
     commentary = ""
+    draft_revision_number = None
     try:
-        sim_result = ctp_api.simulate_slots()
+        sim_result = ctp_api.simulate_slots(slot_groups=slot_groups, caps=caps)
         commentary = (sim_result or {}).get("simulationOutputCommentary", "")
+        draft_revision_number = (sim_result or {}).get("draftRevisionNumber")
     except (requests.HTTPError, requests.ConnectionError, requests.Timeout) as exc:
         sim_warning = f"Simulator unavailable — slots were created but not timed: {exc}"
 
-    # Create the next draft revision with the same slot groups for continued editing
-    draft_commentary = json.dumps({
-        "slotGroups": slot_groups,
-        "caps":       caps,
-        "draft":      True,
-    })
-    draft_revision = ctp_api.create_slot_revision(metadata={
-        "eventId":                        ctp_api.event_id(),
-        "slotGenerationOutputCommentary": draft_commentary,
-    })
+    # If Go created the draft revision (draftRevisionNumber present), use that number.
+    # Otherwise fall back to creating the draft here so the planner stays consistent.
+    if draft_revision_number:
+        planner_revisions = draft_revision_number
+    else:
+        draft_commentary = json.dumps({
+            "slotGroups": slot_groups,
+            "caps":       caps,
+            "draft":      True,
+        })
+        draft_revision = ctp_api.create_slot_revision(metadata={
+            "eventId":                        ctp_api.event_id(),
+            "slotGenerationOutputCommentary": draft_commentary,
+        })
+        planner_revisions = draft_revision.get("number", body.get("plannerRevisions", 0))
 
-    planner_revisions = draft_revision.get("number", body.get("plannerRevisions", 0))
     return slot_groups, caps, planner_revisions, sim_warning, commentary
 
 
@@ -418,6 +460,38 @@ def update_cap():
     return jsonify({"ok": True, "result": result})
 
 
+
+
+@app.get("/throughput-limits/")
+def get_throughput_limits():
+    auth.validate_session(request)
+    try:
+        tag_limits = ctp_api.get_tag_limits()
+        sectors = ctp_api.get_sectors()
+    except requests.HTTPError as e:
+        return _ext_error(e)
+    except requests.ConnectionError:
+        return jsonify({"error": "Cannot reach the CTP API"}), 502
+    return jsonify({"tagLimits": tag_limits, "sectors": sectors})
+
+
+@app.post("/throughput-limits/")
+def save_throughput_limits():
+    user = auth.validate_session(request)
+    _require_staff(user)
+    body = request.get_json(force=True)
+    tag_limits = body.get("tagLimits", [])
+    sector_updates = body.get("sectors", [])
+    try:
+        if tag_limits:
+            ctp_api.patch_tag_limits(tag_limits)
+        for s in sector_updates:
+            ctp_api.patch_sector_slots(s["id"], s.get("maximumSlots", 0))
+    except requests.HTTPError as e:
+        return _ext_error(e)
+    except requests.ConnectionError:
+        return jsonify({"error": "Cannot reach the CTP API"}), 502
+    return jsonify({"ok": True})
 
 
 @app.get("/health/")

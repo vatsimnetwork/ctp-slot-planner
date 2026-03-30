@@ -35,11 +35,13 @@ async function apiFetch(url, options = {}) {
   return res;
 }
 const API = {
-  loadSetup: () => apiFetch('/setup/'),
-  loadSlots: () => apiFetch('/slotgroups/'),
-  save:      (p) => apiFetch('/slotgroups/save/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
-  submit:    (p) => apiFetch('/slotgroups/submit/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
-  syncTime:  (v) => apiFetch('/synctime/', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: v }) }),
+  loadSetup:            () => apiFetch('/setup/'),
+  loadSlots:            () => apiFetch('/slotgroups/'),
+  save:                 (p) => apiFetch('/slotgroups/save/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
+  submit:               (p) => apiFetch('/slotgroups/submit/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
+  syncTime:             (v) => apiFetch('/synctime/', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: v }) }),
+  loadThroughputLimits: () => apiFetch('/throughput-limits/'),
+  saveThroughputLimits: (p) => apiFetch('/throughput-limits/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
 };
 
 // ─── ID parser ────────────────────────────────────────────────────────────────
@@ -173,13 +175,120 @@ function SimParamsModal({ mode, params, onParamsChange, onConfirm, onClose }) {
   );
 }
 
+// ─── ThroughputLimitsPage ─────────────────────────────────────────────────────
+function ThroughputLimitsPage({ isStaff, addToast }) {
+  const [tagLimits, setTagLimits] = useState([]);
+  const [sectors,   setSectors]   = useState([]);
+  const [saving,    setSaving]    = useState(false);
+  const [loaded,    setLoaded]    = useState(false);
+
+  useEffect(() => {
+    API.loadThroughputLimits()
+      .then(r => r.ok ? r.json() : Promise.reject(`Load failed (${r.status})`))
+      .then(d => {
+        setTagLimits(d.tagLimits || []);
+        setSectors(d.sectors || []);
+        setLoaded(true);
+      })
+      .catch(err => addToast(String(err), 'error'));
+  }, []);
+
+  const setTagLimit = (tag, value) =>
+    setTagLimits(prev => prev.map(t => t.tag === tag ? { ...t, maximumAircraftPerHour: Number(value) || 0 } : t));
+
+  const setSectorLimit = (id, value) =>
+    setSectors(prev => prev.map(s => s.id === id ? { ...s, maximumSlots: Number(value) || 0 } : s));
+
+  const handleSave = () => {
+    setSaving(true);
+    API.saveThroughputLimits({
+      tagLimits: tagLimits.map(t => ({ tag: t.tag, maximumAircraftPerHour: t.maximumAircraftPerHour || 0 })),
+      sectors:   sectors.map(s => ({ id: s.id, maximumSlots: s.maximumSlots || 0 })),
+    })
+      .then(r => r.ok ? addToast('Throughput limits saved', 'success') : Promise.reject(`Save failed (${r.status})`))
+      .catch(err => addToast(String(err), 'error'))
+      .finally(() => setSaving(false));
+  };
+
+  if (!loaded) return <div className="planner__loading">Loading…</div>;
+
+  return (
+    <div className="throughput-limits">
+      <div className="throughput-limits__tables">
+        <div className="throughput-limits__table-wrap">
+          <h3 className="throughput-limits__heading">Tag Limits</h3>
+          {tagLimits.length === 0
+            ? <p className="throughput-limits__empty">No tags found on any route for this event.</p>
+            : (
+              <table className="throughput-limits__table">
+                <thead><tr><th>Tag</th><th>Max / Hour</th></tr></thead>
+                <tbody>
+                  {tagLimits.map(t => (
+                    <tr key={t.tag}>
+                      <td>{t.tag}</td>
+                      <td>
+                        <input
+                          className="throughput-limits__input"
+                          type="number" min={0} disabled={!isStaff}
+                          value={t.maximumAircraftPerHour || ''}
+                          placeholder="∞"
+                          onChange={e => setTagLimit(t.tag, e.target.value)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          }
+        </div>
+        <div className="throughput-limits__table-wrap">
+          <h3 className="throughput-limits__heading">Sector Limits</h3>
+          {sectors.length === 0
+            ? <p className="throughput-limits__empty">No sectors found for this event.</p>
+            : (
+              <table className="throughput-limits__table">
+                <thead><tr><th>Sector</th><th>Max Slots</th></tr></thead>
+                <tbody>
+                  {sectors.map(s => (
+                    <tr key={s.id}>
+                      <td>{s.identifier}</td>
+                      <td>
+                        <input
+                          className="throughput-limits__input"
+                          type="number" min={0} disabled={!isStaff}
+                          value={s.maximumSlots || ''}
+                          placeholder="∞"
+                          onChange={e => setSectorLimit(s.id, e.target.value)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          }
+        </div>
+      </div>
+      {isStaff && (
+        <div className="throughput-limits__footer">
+          <button className="planner__btn" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save Limits'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 export default function SlotPlanner() {
   const [theme, setTheme] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   const [data, setData]   = useState({ deps:[], depRoutes:[], tracks:[], arrRoutes:[], arrs:[], connections:[] });
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
-  const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[], tracksByDepRoute:{}, arrRoutesByTrack:{}, arrByArrRoute:{}, dbIds:{airports:{},routeSegments:{}}, departureHours:3, defaultCaps:{deps:{},depRoutes:{},tracks:{},arrRoutes:{},arrs:{}} });
+  const [activeTab, setActiveTab] = useState('planner');
+  const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[], tracksByDepRoute:{}, arrRoutesByTrack:{}, arrByArrRoute:{}, dbIds:{airports:{},routeSegments:{}}, departureHours:3, defaultCaps:{deps:{},depRoutes:{},tracks:{},arrRoutes:{},arrs:{}}, tagMap:{}, sectorMap:{}, tagLimits:[], sectorLimits:[] });
   const [simVersion,       setSimVersion]       = useState(null);
   const [plannerRevisions, setPlannerRevisions] = useState(0);
   const [selectedDep, setSelectedDep] = useState(null);
@@ -231,6 +340,10 @@ export default function SlotPlanner() {
         dbIds:            setup.dbIds||{airports:{},routeSegments:{}},
         departureHours:   setup.departureHours||3,
         defaultCaps:      setup.defaultCaps||{deps:{},depRoutes:{},tracks:{},arrRoutes:{},arrs:{}},
+        tagMap:           setup.tagMap||{},
+        sectorMap:        setup.sectorMap||{},
+        tagLimits:        setup.tagLimits||[],
+        sectorLimits:     setup.sectorLimits||[],
       });
       setIsStaff(setup.isStaff ?? false);
       if (setup.syncTime) setSyncTime(setup.syncTime);
@@ -275,6 +388,33 @@ export default function SlotPlanner() {
     }, 800);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [data, loading]);
+
+  // ── Tag / sector limit warnings ───────────────────────────────────────────
+  const warnTimer = useRef(null);
+  useEffect(() => {
+    if (warnTimer.current) clearTimeout(warnTimer.current);
+    warnTimer.current = setTimeout(() => {
+      const { tagMap, sectorMap, tagLimits, sectorLimits, departureHours } = setupData;
+      const tagUsage = {};
+      const sectorUsage = {};
+      connections.forEach(c => {
+        (tagMap[c.track] || []).forEach(tag => { tagUsage[tag] = (tagUsage[tag] || 0) + c.value; });
+        (sectorMap[c.track] || []).forEach(s => { sectorUsage[s.identifier] = (sectorUsage[s.identifier] || 0) + c.value; });
+      });
+      tagLimits.forEach(tl => {
+        if (!tl.maximumAircraftPerHour) return;
+        const limit = Math.floor(tl.maximumAircraftPerHour * departureHours);
+        const used = tagUsage[tl.tag] || 0;
+        if (used > limit) addToast(`Tag limit exceeded: ${tl.tag} (${used}/${limit} slots)`, 'warning');
+      });
+      sectorLimits.forEach(s => {
+        if (!s.maximumSlots) return;
+        const used = sectorUsage[s.identifier] || 0;
+        if (used > s.maximumSlots) addToast(`Sector limit exceeded: ${s.identifier} (${used}/${s.maximumSlots} slots)`, 'warning');
+      });
+    }, 800);
+    return () => { if (warnTimer.current) clearTimeout(warnTimer.current); };
+  }, [connections]);
 
   // ── Sync time (debounced, PATCH to event) ────────────────────────────────
   const handleSyncTimeChange = useCallback((val) => {
@@ -514,6 +654,10 @@ export default function SlotPlanner() {
       {/* Top bar */}
       <div className="planner__topbar">
         <a href="/" className="planner__title">CTP Slot Planner</a>
+        <div className="planner__tabs">
+          <button className={`planner__tab${activeTab === 'planner' ? ' planner__tab--active' : ''}`} onClick={() => setActiveTab('planner')}>Slot Planner</button>
+          <button className={`planner__tab${activeTab === 'throughputLimits' ? ' planner__tab--active' : ''}`} onClick={() => setActiveTab('throughputLimits')}>Throughput Limits</button>
+        </div>
         <div className="planner__topbar-right">
           <div className="planner__start-time">
             <span
@@ -536,8 +680,10 @@ export default function SlotPlanner() {
         </div>
       </div>
 
+      {activeTab === 'throughputLimits' && <ThroughputLimitsPage isStaff={isStaff} addToast={addToast}/>}
+
       {/* Control bar */}
-      <div className="planner__control-bar" onClick={e=>e.stopPropagation()}>
+      {activeTab === 'planner' && <div className="planner__control-bar" onClick={e=>e.stopPropagation()}>
         {selectedDep && <div className="planner__editing-label"><span className="planner__editing-dot"/>Editing: <strong>{selectedDep}</strong></div>}
 
         <div className="planner__instructions">
@@ -661,10 +807,10 @@ export default function SlotPlanner() {
             </div>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Sankey grid */}
-      <div className="planner__grid" ref={gridRef}>
+      {activeTab === 'planner' && <div className="planner__grid" ref={gridRef}>
         <svg ref={svgRef} className="planner__svg"/>
 
         {/* Departure */}
@@ -739,7 +885,7 @@ export default function SlotPlanner() {
           );})}
         </div>
 
-      </div>
+      </div>}
     </div>
   );
 }

@@ -202,3 +202,24 @@
 
 /* ── Read-only badge ── */
 .planner__readonly-badge { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); background:var(--bg-hover); border:1px solid var(--border); border-radius:5px; padding:3px 9px; user-select:none; }
+
+/* ── Tabs ── */
+.planner__tabs { display:flex; align-items:center; gap:4px; }
+.planner__tab { background:transparent; border:none; border-radius:6px; padding:6px 14px; font-family:inherit; font-size:14px; font-weight:600; color:var(--text-muted); cursor:pointer; transition:background .12s,color .12s; }
+.planner__tab:hover { background:var(--bg-hover); color:var(--text); }
+.planner__tab--active { background:var(--accent-subtle); color:var(--accent); }
+
+/* ── Throughput Limits page ── */
+.throughput-limits { padding:24px 28px; }
+.throughput-limits__tables { display:flex; gap:40px; align-items:flex-start; flex-wrap:wrap; }
+.throughput-limits__table-wrap { flex:1; min-width:220px; }
+.throughput-limits__heading { font-size:15px; font-weight:700; color:var(--text); margin-bottom:12px; }
+.throughput-limits__empty { font-size:13px; color:var(--text-muted); font-style:italic; }
+.throughput-limits__table { width:100%; border-collapse:collapse; font-size:14px; }
+.throughput-limits__table th { text-align:left; font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--text-muted); padding:6px 10px; border-bottom:2px solid var(--border); }
+.throughput-limits__table td { padding:7px 10px; border-bottom:1px solid var(--border-subtle); color:var(--text); }
+.throughput-limits__table tr:last-child td { border-bottom:none; }
+.throughput-limits__input { font-family:inherit; font-size:13px; font-weight:600; color:var(--text); background:var(--bg); border:1.5px solid var(--border); border-radius:6px; padding:4px 8px; width:80px; outline:none; transition:border-color .14s,box-shadow .14s; }
+.throughput-limits__input:focus { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-subtle); }
+.throughput-limits__input:disabled { opacity:.5; cursor:not-allowed; }
+.throughput-limits__footer { margin-top:24px; }

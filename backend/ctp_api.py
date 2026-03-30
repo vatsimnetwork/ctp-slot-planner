@@ -98,6 +98,22 @@ def patch_route_segment_capacity(segment_id: int, maximum_aircraft_per_hour: int
     return _patch(f"/route-segments/{segment_id}/capacity", {"maximumAircraftPerHour": maximum_aircraft_per_hour})
 
 
+def get_tag_limits(eid: int = None):
+    return _get(f"/events/{eid or _EVENT}/tag-limits")
+
+
+def patch_tag_limits(limits: list, eid: int = None):
+    return _patch(f"/events/{eid or _EVENT}/tag-limits", limits)
+
+
+def get_sectors(eid: int = None):
+    return _get(f"/events/{eid or _EVENT}/sectors")
+
+
+def patch_sector_slots(sector_id: int, maximum_slots: int):
+    return _patch(f"/sectors/{sector_id}/capacity", {"maximumSlots": maximum_slots})
+
+
 # ── Slot revisions ────────────────────────────────────────────────────────────
 
 def list_slot_revisions(eid: int = None):
@@ -144,8 +160,13 @@ def calculate_slots(eid: int = None):
     return _post(f"/events/{eid or _EVENT}/calculate-slots", {})
 
 
-def simulate_slots(eid: int = None):
-    return _post(f"/events/{eid or _EVENT}/simulate-slots", {})
+def simulate_slots(slot_groups: list = None, caps: dict = None, eid: int = None):
+    body = {}
+    if slot_groups is not None:
+        body["slotGroups"] = slot_groups
+    if caps is not None:
+        body["caps"] = caps
+    return _post(f"/events/{eid or _EVENT}/simulate-slots", body)
 
 
 # ── Helpers: derive setup from route segments ─────────────────────────────────
