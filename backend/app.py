@@ -39,6 +39,24 @@ def _require_staff(user: dict):
         abort(403, description="insufficient role")
 
 
+# ─── Time format helpers ──────────────────────────────────────────────────────
+
+def _to_api_time(t: str) -> str:
+    """Convert '1600z' → '16:00:00' for the VATSIM event API."""
+    t = (t or "").strip().lower().rstrip("z")
+    t = t.zfill(4)
+    return f"{t[:2]}:{t[2:4]}:00"
+
+
+def _from_api_time(t: str) -> str:
+    """Convert '16:00:00' → '1600z' for the frontend TimeSpinner."""
+    t = (t or "").strip()
+    parts = t.split(":")
+    if len(parts) >= 2:
+        return f"{parts[0].zfill(2)}{parts[1].zfill(2)}z"
+    return t
+
+
 # ─── /setup/ ──────────────────────────────────────────────────────────────────
 
 @app.get("/setup/")
@@ -99,7 +117,7 @@ def setup():
     except Exception:
         routes_revision = None
 
-    return jsonify({**derived, "routesRevision": routes_revision, "isStaff": is_staff, "syncTime": event.get("departureTimeWindowOffsetSynchronizationTimeOfDay", "1600z") if event else "1600z"})
+    return jsonify({**derived, "routesRevision": routes_revision, "isStaff": is_staff, "syncTime": _from_api_time(event.get("departureTimeWindowOffsetSynchronizationTimeOfDay", "16:00:00")) if event else "1600z"})
 
 
 # ─── /slotgroups/ ─────────────────────────────────────────────────────────────
@@ -207,7 +225,7 @@ def submit_slotgroups():
         "HighSimulationAccuracy":                                "highSimulationAccuracy",
     }
     event_update = {
-        api_k: _coerce(fe_k, sim_params[fe_k])
+        api_k: (_to_api_time(_coerce(fe_k, sim_params[fe_k])) if fe_k == "DepartureTimeWindowOffsetSynchronizationTimeOfDay" else _coerce(fe_k, sim_params[fe_k]))
         for fe_k, api_k in field_map.items()
         if fe_k in sim_params
     }
@@ -352,7 +370,7 @@ def update_sync_time():
         return jsonify({"error": "value required"}), 400
     try:
         ctp_api.update_event(ctp_api.event_id(), {
-            "departureTimeWindowOffsetSynchronizationTimeOfDay": value,
+            "departureTimeWindowOffsetSynchronizationTimeOfDay": _to_api_time(value),
         })
     except requests.HTTPError as e:
         return _ext_error(e)
