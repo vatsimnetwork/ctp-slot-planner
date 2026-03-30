@@ -1,36 +1,23 @@
 import os
 import json
-import functools
 import requests
-from flask import Flask, request, jsonify, session, redirect
+from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
 from dotenv import load_dotenv
 
 load_dotenv()
 
+import auth
 import ctp_api
 
-app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me-in-production")
+app = Flask(__name__, static_folder='frontend_dist', static_url_path='')
 
 CORS(app, supports_credentials=True, resources={r"/*": {"origins": "*"}})
 
 DEBUG = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
-AUTH_BYPASS = os.environ.get("AUTH_BYPASS", "false").lower() == "true"
 
 
 # ─── Auth helpers ─────────────────────────────────────────────────────────────
-
-def require_login(fn):
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        if AUTH_BYPASS:
-            return fn(*args, **kwargs)
-        if "user" not in session:
-            return jsonify({"error": "Not authenticated"}), 401
-        return fn(*args, **kwargs)
-    return wrapper
-
 
 def _ext_error(e: requests.HTTPError):
     status = e.response.status_code if e.response is not None else 502
@@ -41,59 +28,25 @@ def _ext_error(e: requests.HTTPError):
     return jsonify({"error": "External API error", "upstream": body}), status
 
 
-# ─── Auth routes ──────────────────────────────────────────────────────────────
-
-@app.get("/login/")
-def login():
-    return redirect(
-        "https://auth.vatsim.net/oauth/authorize"
-        f"?client_id={os.environ.get('VATSIM_CLIENT_ID','')}"
-        "&redirect_uri=https://planning.ctp.vatsim.net/auth/callback"
-        "&response_type=code"
-        "&scope=full_name"
-    )
+WRITE_ROLES = {"slot_staff", "developer", "administrator"}
 
 
-@app.get("/auth/callback/")
-def auth_callback():
-    code = request.args.get("code")
-    if not code:
-        return jsonify({"error": "Missing code"}), 400
-    try:
-        res = requests.post("https://auth.vatsim.net/oauth/token", data={
-            "grant_type":    "authorization_code",
-            "client_id":     os.environ.get("VATSIM_CLIENT_ID", ""),
-            "client_secret": os.environ.get("VATSIM_CLIENT_SECRET", ""),
-            "redirect_uri":  "https://planning.ctp.vatsim.net/auth/callback",
-            "code":          code,
-        }, timeout=15)
-        res.raise_for_status()
-        token = res.json().get("access_token")
-        user = requests.get(
-            "https://auth.vatsim.net/api/user",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        ).json()
-        session["user"] = user
-    except Exception as e:
-        return jsonify({"error": f"Auth failed: {e}"}), 500
-    return redirect("/")
-
-
-@app.get("/logout/")
-def logout():
-    session.clear()
-    return redirect("/")
+def _require_staff(user: dict):
+    if not WRITE_ROLES.intersection(user.get("roles", [])):
+        from flask import abort
+        abort(403, description="insufficient role")
 
 
 # ─── /setup/ ──────────────────────────────────────────────────────────────────
 
 @app.get("/setup/")
-@require_login
 def setup():
+    user = auth.validate_session(request)
+    is_staff = bool(WRITE_ROLES.intersection(user.get("roles", [])))
     try:
         route_segments = ctp_api.get_route_segments()
         airports = ctp_api.get_airports()
+        event = ctp_api.get_event_basic()
     except requests.HTTPError as e:
         return _ext_error(e)
     except requests.ConnectionError:
@@ -101,8 +54,26 @@ def setup():
     except Exception as e:
         return jsonify({"error": f"Setup failed: {e}"}), 500
 
+    # departureTimeWindow is stored in nanoseconds (Go time.Duration)
+    dtw_ns = 10_800_000_000_000  # default 3h
+    if event:
+        raw = event.get("departureTimeWindow")
+        if isinstance(raw, (int, float)):
+            dtw_ns = int(raw)
+        elif isinstance(raw, str):
+            # serialized as Go duration string e.g. "3h0m0s" — parse it
+            import re
+            total_ns = 0
+            for val, unit in re.findall(r"(\d+(?:\.\d+)?)([hms])", raw):
+                v = float(val)
+                if unit == "h":   total_ns += int(v * 3_600_000_000_000)
+                elif unit == "m": total_ns += int(v * 60_000_000_000)
+                elif unit == "s": total_ns += int(v * 1_000_000_000)
+            if total_ns:
+                dtw_ns = total_ns
+
     try:
-        derived = ctp_api.derive_setup(route_segments, airports)
+        derived = ctp_api.derive_setup(route_segments, airports, departure_time_window_ns=dtw_ns)
     except Exception as e:
         return jsonify({"error": f"Failed to parse API data: {e}"}), 500
 
@@ -126,14 +97,14 @@ def setup():
     except Exception:
         routes_revision = None
 
-    return jsonify({**derived, "routesRevision": routes_revision})
+    return jsonify({**derived, "routesRevision": routes_revision, "isStaff": is_staff, "syncTime": event.get("departureTimeWindowOffsetSynchronizationTimeOfDay", "1600z") if event else "1600z"})
 
 
 # ─── /slotgroups/ ─────────────────────────────────────────────────────────────
 
 @app.get("/slotgroups/")
-@require_login
 def get_slotgroups():
+    auth.validate_session(request)
     try:
         latest = ctp_api.get_latest_slot_revision()
         rev = ctp_api.get_latest_route_revision()
@@ -145,23 +116,18 @@ def get_slotgroups():
     routes_revision = rev["number"] if rev else None
     planner_revisions = latest.get("number", 0) if latest else 0
 
-    slot_groups, caps, dep_times, start_time = [], {}, {}, "1800z"
+    slot_groups, caps = [], {}
 
     if latest:
         draft = _parse_commentary(latest.get("slotGenerationOutputCommentary", ""))
         if draft:
             slot_groups = draft.get("slotGroups", [])
             caps        = draft.get("caps", {})
-            dep_times   = draft.get("depTimes", {})
-            if draft.get("startTime"):
-                start_time = draft["startTime"]
 
     return jsonify({
         "slotGroups":       slot_groups,
         "routesRevision":   routes_revision,
         "plannerRevisions": planner_revisions,
-        "startTime":        start_time,
-        "depTimes":         dep_times,
         "caps":             caps,
     })
 
@@ -169,15 +135,14 @@ def get_slotgroups():
 # ─── /slotgroups/save/ ────────────────────────────────────────────────────────
 
 @app.post("/slotgroups/save/")
-@require_login
 def save_slotgroups():
+    user = auth.validate_session(request)
+    _require_staff(user)
     body = request.get_json(force=True)
 
     commentary = json.dumps({
         "slotGroups": body.get("slotGroups", []),
         "caps":       body.get("caps", {}),
-        "depTimes":   body.get("depTimes", {}),
-        "startTime":  body.get("startTime", "1800z"),
         "draft":      True,
     })
 
@@ -203,12 +168,28 @@ def save_slotgroups():
 # ─── /slotgroups/submit/ ──────────────────────────────────────────────────────
 
 @app.post("/slotgroups/submit/")
-@require_login
 def submit_slotgroups():
+    user = auth.validate_session(request)
+    _require_staff(user)
     body = request.get_json(force=True)
     mode = body.get("mode", "calculate")
 
     sim_params = body.get("simulatorParams", {})
+
+    # The Go API stores these as int enums (iota); the frontend sends the string names.
+    _SLOT_GENERATION_MODE = {"MaximizeSlots": 0, "Random": 1}
+    _DTW_OFFSETS_MODE     = {"None": 0, "EarliestRoutes": 1, "LatestRoutes": 2, "RouteAverage": 3}
+    _WAYPOINT_TP_MODE     = {"None": 0, "FirstWaypointsOfNATRouteSegmentsOnly": 1, "AllWaypoints": 2}
+
+    def _coerce(key, raw):
+        if key == "IntendedSlotGenerationMode":
+            return _SLOT_GENERATION_MODE.get(raw, raw)
+        if key == "IntendedDepartureTimeWindowOffsetsCalculationMode":
+            return _DTW_OFFSETS_MODE.get(raw, raw)
+        if key == "IntendedWaypointThroughputCalculationMode":
+            return _WAYPOINT_TP_MODE.get(raw, raw)
+        return raw
+
     field_map = {
         "RecalculateMaximumAirportSlots":                        "recalculateMaximumAirportSlots",
         "IntendedSlotGenerationMode":                            "intendedSlotGenerationMode",
@@ -224,7 +205,7 @@ def submit_slotgroups():
         "HighSimulationAccuracy":                                "highSimulationAccuracy",
     }
     event_update = {
-        api_k: sim_params[fe_k]
+        api_k: _coerce(fe_k, sim_params[fe_k])
         for fe_k, api_k in field_map.items()
         if fe_k in sim_params
     }
@@ -234,38 +215,180 @@ def submit_slotgroups():
             ctp_api.update_event(ctp_api.event_id(), event_update)
 
         if mode == "simulate":
-            result = ctp_api.simulate_slots()
+            slot_groups, caps, planner_revisions, sim_warning, commentary = _submit_simulate(body)
         else:
-            result = ctp_api.calculate_slots()
-
-        commentary = json.dumps({
-            "slotGroups": result.get("slotGroups", body.get("slotGroups", [])),
-            "caps":       body.get("caps", {}),
-            "depTimes":   body.get("depTimes", {}),
-            "startTime":  body.get("startTime", "1800z"),
-            "draft":      False,
-            "mode":       mode,
-        })
-        ctp_api.create_slot_revision(metadata={
-            "eventId":                        ctp_api.event_id(),
-            "slotGenerationOutputCommentary": commentary,
-        })
+            slot_groups, caps, planner_revisions, commentary = _submit_calculate(body)
+            sim_warning = None
 
     except requests.HTTPError as e:
         return _ext_error(e)
     except requests.ConnectionError:
         return jsonify({"error": "Cannot reach the CTP API"}), 502
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    
-    return jsonify({
-        "slotGroups":       result.get("slotGroups", []),
-        "caps":             result.get("caps", body.get("caps", {})),
-        "plannerRevisions": body.get("plannerRevisions", 0),
+    resp = {
+        "slotGroups":       slot_groups,
+        "caps":             caps,
+        "plannerRevisions": planner_revisions,
         "mode":             mode,
+    }
+    if sim_warning:
+        resp["warning"] = sim_warning
+    if commentary:
+        resp["commentary"] = commentary
+    return jsonify(resp)
+
+
+def _submit_simulate(body: dict):
+    """
+    Simulate flow:
+    1. Parse draft slot groups from the latest revision's commentary.
+    2. Generate actual slot records from those groups.
+    3. Create a new slot revision and populate it with the actual slots.
+    4. Call simulate_slots (uses the newly created latest revision).
+    5. Create another new revision as draft for continued editing.
+    Returns (slot_groups, caps, new_planner_revisions).
+    """
+    caps = body.get("caps", {})
+
+    # Fetch draft slot groups from latest revision
+    latest = ctp_api.get_latest_slot_revision()
+    draft = _parse_commentary(latest.get("slotGenerationOutputCommentary", "")) if latest else None
+    slot_groups = (draft.get("slotGroups", []) if draft else None) or body.get("slotGroups", [])
+    if draft:
+        caps = draft.get("caps", caps)
+
+    # Build db_ids lookup for airports and route segments
+    route_segments = ctp_api.get_route_segments()
+    airports = ctp_api.get_airports()
+    derived = ctp_api.derive_setup(route_segments, airports)
+    db_ids = derived["dbIds"]
+
+    # Create a new revision to hold the actual slots (this becomes "locked" after simulate)
+    sim_revision = ctp_api.create_slot_revision(metadata={
+        "eventId": ctp_api.event_id(),
+    })
+    sim_revision_id = sim_revision["id"]
+
+    # Generate and upload actual slots — this must succeed before calling the simulator
+    slots = _generate_slots_from_groups(slot_groups, db_ids)
+    if slots:
+        ctp_api.add_slots_to_revision(sim_revision_id, slots)
+
+    # Run the simulator. If it is unavailable we continue anyway — the slots are
+    # already saved and the draft revision is still created below so the planner
+    # remains in a consistent state. The warning is surfaced to the frontend.
+    sim_warning = None
+    commentary = ""
+    try:
+        sim_result = ctp_api.simulate_slots()
+        commentary = (sim_result or {}).get("simulationOutputCommentary", "")
+    except (requests.HTTPError, requests.ConnectionError, requests.Timeout) as exc:
+        sim_warning = f"Simulator unavailable — slots were created but not timed: {exc}"
+
+    # Create the next draft revision with the same slot groups for continued editing
+    draft_commentary = json.dumps({
+        "slotGroups": slot_groups,
+        "caps":       caps,
+        "draft":      True,
+    })
+    draft_revision = ctp_api.create_slot_revision(metadata={
+        "eventId":                        ctp_api.event_id(),
+        "slotGenerationOutputCommentary": draft_commentary,
     })
 
+    planner_revisions = draft_revision.get("number", body.get("plannerRevisions", 0))
+    return slot_groups, caps, planner_revisions, sim_warning, commentary
 
-# ─── Health check ─────────────────────────────────────────────────────────────
+
+def _submit_calculate(body: dict):
+    # Simulator creates Rev N+1 with proposed slots
+    calc_result = ctp_api.calculate_slots()
+    commentary = calc_result.get("slotGenerationOutputCommentary", "") if calc_result else ""
+
+    # Fetch the newly created revision (now the latest) with full slot data
+    calc_revision = ctp_api.get_latest_slot_revision()
+
+    # Reverse-map slots → slot groups
+    route_segments = ctp_api.get_route_segments()
+    airports = ctp_api.get_airports()
+    raw_slots = calc_revision.get("slots", []) if calc_revision else []
+    slot_groups = _derive_slot_groups_from_slots(raw_slots, route_segments, airports)
+
+    # Derive caps from the DB so user-set capacities (airports.maximumSlots,
+    # routeSegments.maximumAircraftPerHour) are reflected immediately.
+    # Airport caps use maximumSlots directly (not a per-hour rate).
+    # Route segment caps use maximumAircraftPerHour * departure_hours.
+    derived = ctp_api.derive_setup(route_segments, airports)
+    caps = derived["defaultCaps"]
+
+    # Create the draft revision for editing
+    draft_commentary = json.dumps({
+        "slotGroups": slot_groups,
+        "caps":       caps,
+        "draft":      True,
+    })
+    draft_revision = ctp_api.create_slot_revision(metadata={
+        "eventId":                        ctp_api.event_id(),
+        "slotGenerationOutputCommentary": draft_commentary,
+    })
+
+    planner_revisions = draft_revision.get("number", body.get("plannerRevisions", 0))
+    return slot_groups, caps, planner_revisions, commentary
+
+
+# ─── /synctime/ ──────────────────────────────────────────────────────────────
+
+@app.patch("/synctime/")
+def update_sync_time():
+    user = auth.validate_session(request)
+    _require_staff(user)
+    body = request.get_json(force=True)
+    value = body.get("value")
+    if not value:
+        return jsonify({"error": "value required"}), 400
+    try:
+        ctp_api.update_event(ctp_api.event_id(), {
+            "departureTimeWindowOffsetSynchronizationTimeOfDay": value,
+        })
+    except requests.HTTPError as e:
+        return _ext_error(e)
+    except requests.ConnectionError:
+        return jsonify({"error": "Cannot reach the CTP API"}), 502
+    return jsonify({"ok": True})
+
+
+# ─── /caps/ ───────────────────────────────────────────────────────────────────
+
+@app.post("/caps/")
+def update_cap():
+    user = auth.validate_session(request)
+    _require_staff(user)
+    body = request.get_json(force=True)
+    entity_type = body.get("type")   # "airport" | "routeSegment"
+    entity_id   = body.get("id")     # DB id (integer)
+    value       = body.get("value")  # integer
+
+    if entity_id is None or value is None:
+        return jsonify({"error": "id and value required"}), 400
+
+    try:
+        if entity_type == "airport":
+            result = ctp_api.patch_airport_capacity(int(entity_id), maximum_slots=int(value))
+        elif entity_type == "routeSegment":
+            result = ctp_api.patch_route_segment_capacity(int(entity_id), maximum_aircraft_per_hour=int(value))
+        else:
+            return jsonify({"error": f"Unknown type: {entity_type}"}), 400
+    except requests.HTTPError as e:
+        return _ext_error(e)
+    except requests.ConnectionError:
+        return jsonify({"error": "Cannot reach the CTP API"}), 502
+
+    return jsonify({"ok": True, "result": result})
+
+
+
 
 @app.get("/health/")
 def health():
@@ -286,6 +409,10 @@ def health():
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _split_slot_id(id_str):
+    if '|' in id_str:
+        parts = id_str.split('|')
+        return parts if len(parts) == 5 else None
+    # Legacy: split on the first 4 hyphens
     parts, s = [], id_str
     for _ in range(4):
         idx = s.find('-')
@@ -304,6 +431,142 @@ def _parse_commentary(raw: str):
         return json.loads(raw)
     except Exception:
         return None
+
+
+def _generate_slots_from_groups(slot_groups: list, db_ids: dict) -> list:
+    airport_ids   = db_ids.get("airports", {})
+    rs_ids        = db_ids.get("routeSegments", {})
+    result = []
+
+    for group in slot_groups:
+        gid   = group.get("id", "")
+        count = int(group.get("value", 0))
+        if count <= 0:
+            continue
+
+        parts = _split_slot_id(gid)
+        if not parts:
+            continue
+        dep, dep_route, track, arr_route, arr = parts
+
+        dep_airport_id = airport_ids.get(dep)
+        arr_airport_id = airport_ids.get(arr)
+        dep_route_id   = rs_ids.get(dep_route)
+        track_id       = rs_ids.get(track)
+        arr_route_id   = rs_ids.get(arr_route)
+
+        if not all([dep_airport_id, arr_airport_id, dep_route_id, track_id, arr_route_id]):
+            import sys
+            print(
+                f"[slot-planner] WARNING: could not resolve all IDs for group '{gid}' "
+                f"(dep={dep_airport_id}, arr={arr_airport_id}, "
+                f"depRoute={dep_route_id}, track={track_id}, arrRoute={arr_route_id}) — skipping",
+                file=sys.stderr,
+            )
+            continue
+
+        route_segments = [{"id": dep_route_id}, {"id": track_id}, {"id": arr_route_id}]
+        slot_template  = {
+            "departureAirportId": dep_airport_id,
+            "arrivalAirportId":   arr_airport_id,
+            "routeSegments":      route_segments,
+        }
+        result.extend([slot_template.copy() for _ in range(count)])
+
+    return result
+
+
+def _derive_slot_groups_from_slots(slots: list, route_segments: list, airports: list) -> list:
+    # Build airport identifier set (upper-cased)
+    airport_icaos = {
+        (a.get("waypoint", {}).get("identifier") or a.get("identifier", "")).strip().upper()
+        for a in (airports or [])
+    }
+
+    def _norm(v):
+        return (v or "").strip().upper()
+
+    def _sorted_locs(seg):
+        return sorted(seg.get("locations") or [], key=lambda l: l.get("sortOrder", 0))
+
+    def _first_fix(seg):
+        locs = _sorted_locs(seg)
+        return _norm(locs[0].get("waypoint", {}).get("identifier", "")) if locs else None
+
+    def _last_fix(seg):
+        locs = _sorted_locs(seg)
+        return _norm(locs[-1].get("waypoint", {}).get("identifier", "")) if locs else None
+
+    def _classify(seg):
+        """Return 'dep', 'track', or 'arr'."""
+        if _norm(seg.get("routeSegmentGroup", "")) == "OCA":
+            return "track"
+        if _first_fix(seg) in airport_icaos:
+            return "dep"
+        if _last_fix(seg) in airport_icaos:
+            return "arr"
+        # Fallback: treat as dep if unclassifiable
+        return "dep"
+
+    # Build a classification cache keyed by route segment DB id
+    rs_class_by_id = {}
+    for rs in (route_segments or []):
+        if rs.get("id"):
+            rs_class_by_id[rs["id"]] = (_classify(rs), (rs.get("identifier") or "").strip())
+
+    counts: dict = {}
+
+    for slot in (slots or []):
+        dep_icao = _norm(
+            slot.get("departureAirport", {}).get("waypoint", {}).get("identifier", "")
+        )
+        arr_icao = _norm(
+            slot.get("arrivalAirport", {}).get("waypoint", {}).get("identifier", "")
+        )
+        if not dep_icao or not arr_icao:
+            continue
+
+        dep_route_id  = None
+        track_id      = None
+        arr_route_id  = None
+
+        for rs in (slot.get("routeSegments") or []):
+            rs_id = rs.get("id")
+            if rs_id is None:
+                continue
+            info = rs_class_by_id.get(rs_id)
+            if not info:
+                # Fall back to classifying inline if not pre-built (should not happen)
+                kind = _classify(rs)
+                ident = (rs.get("identifier") or "").strip()
+            else:
+                kind, ident = info
+
+            if kind == "dep" and dep_route_id is None:
+                dep_route_id = ident
+            elif kind == "track" and track_id is None:
+                track_id = ident
+            elif kind == "arr" and arr_route_id is None:
+                arr_route_id = ident
+
+        if not all([dep_route_id, track_id, arr_route_id]):
+            continue
+
+        group_id = f"{dep_icao}|{dep_route_id}|{track_id}|{arr_route_id}|{arr_icao}"
+        counts[group_id] = counts.get(group_id, 0) + 1
+
+    return [{"id": gid, "value": v} for gid, v in sorted(counts.items())]
+
+
+# ── Frontend SPA ──────────────────────────────────────────────────────────────
+
+@app.get('/', defaults={'path': ''})
+@app.get('/<path:path>')
+def serve_frontend(path):
+    full_path = os.path.join(app.static_folder, path)
+    if path and os.path.exists(full_path):
+        return app.send_static_file(path)
+    return app.send_static_file('index.html')
 
 
 # ─── Run ─────────────────────────────────────────────────────────────────────

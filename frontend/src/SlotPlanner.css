@@ -39,6 +39,8 @@
 .planner__btn:disabled { opacity:.4; cursor:not-allowed; }
 .planner__btn--sim { background:var(--green); }
 .planner__btn--sim:hover:not(:disabled) { background:var(--green-hover); }
+.planner__btn--destructive { background:#c0392b; }
+.planner__btn--destructive:hover:not(:disabled) { background:#a93226; }
 .planner__btn--logout { background:var(--bg-hover); color:var(--text); border:1px solid var(--border); font-size:13px; padding:6px 12px; }
 .planner__btn--logout:hover { background:var(--bg-selected); }
 .planner__btn--theme { width:42px; height:42px; padding:0; border-radius:999px; justify-content:center; background:var(--bg-hover); color:var(--text); border:1px solid var(--border); }
@@ -119,6 +121,7 @@
 .planner__cap-input { font-family:'Inter',monospace; font-size:12px; font-weight:600; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:3px 5px; width:60px; text-align:center; outline:none; transition:border-color .14s; }
 .planner__cap-input:focus { border-color:var(--accent); }
 .planner__cap-input::placeholder { color:var(--text-faint); }
+.planner__cap-input:disabled { opacity:.45; cursor:not-allowed; }
 
 /* ── Connection labels ── */
 .planner__conn-label { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:5px; font-size:12px; font-weight:500; color:#fff; flex-shrink:0; user-select:none; }
@@ -196,3 +199,6 @@
 .modal-input  { width:90px; text-align:center; cursor:text; }
 .modal-select:focus,.modal-input:focus { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-subtle); }
 .modal-footer { display:flex; align-items:center; justify-content:flex-end; gap:10px; padding:14px 20px; border-top:1px solid var(--border); }
+
+/* ── Read-only badge ── */
+.planner__readonly-badge { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); background:var(--bg-hover); border:1px solid var(--border); border-radius:5px; padding:3px 9px; user-select:none; }

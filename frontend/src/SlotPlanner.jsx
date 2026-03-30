@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useLayoutEffect, useCallback } from "react";
+import React, { useEffect, useRef, useState, useLayoutEffect, useCallback } from "react";
 import * as d3 from "d3";
 import "./SlotPlanner.css";
 
@@ -7,9 +7,9 @@ const ROW_H       = 52;
 const HEADER_H    = 47 + 20;
 const TRACK_COLS  = ['#2783C5', '#29B473', '#2A3B90', '#E8543E', '#9B59B6', '#F39C12'];
 const BRACE_W     = 18;
-const TIME_W      = 108;
-const BRACE_GAP   = 8;
-const BRACE_COL_W = TIME_W + BRACE_GAP + BRACE_W;
+const TIME_W      = 0;
+const BRACE_GAP   = 0;
+const BRACE_COL_W = BRACE_W + 16;
 
 // ─── Default simulator parameters ────────────────────────────────────────────
 const DEFAULT_SIM_PARAMS = {
@@ -28,9 +28,10 @@ const DEFAULT_SIM_PARAMS = {
 };
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
+const BASE = import.meta.env.BASE_URL;
 async function apiFetch(url, options = {}) {
-  const res = await fetch(url, { ...options, credentials: 'include' });
-  if (res.status === 401) { window.location.href = '/login/'; throw new Error('Unauthorized'); }
+  const res = await fetch(BASE + url.replace(/^\//, ''), { ...options, credentials: 'include' });
+  if (res.status === 401) { window.location.href = BASE + 'login/'; throw new Error('Unauthorized'); }
   return res;
 }
 const API = {
@@ -38,10 +39,20 @@ const API = {
   loadSlots: () => apiFetch('/slotgroups/'),
   save:      (p) => apiFetch('/slotgroups/save/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
   submit:    (p) => apiFetch('/slotgroups/submit/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
+  syncTime:  (v) => apiFetch('/synctime/', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: v }) }),
 };
 
-// ─── ID parser (splits on first 4 hyphens only) ───────────────────────────────
+// ─── ID parser ────────────────────────────────────────────────────────────────
+// New IDs use '|' as separator to avoid ambiguity with route segment identifiers
+// that contain hyphens.  Legacy IDs (stored before this change) still use the
+// first-4-hyphen split for backward compatibility.
 function splitSlotId(id) {
+  if (id.includes('|')) {
+    const parts = id.split('|');
+    if (parts.length !== 5) { console.warn('[SlotPlanner] Bad ID:', id); return null; }
+    return parts;
+  }
+  // Legacy: split on the first 4 hyphens
   const parts = []; let str = id;
   for (let i = 0; i < 4; i++) {
     const idx = str.indexOf('-');
@@ -181,18 +192,20 @@ export default function SlotPlanner() {
   const [data, setData]   = useState({ deps:[], depRoutes:[], tracks:[], arrRoutes:[], arrs:[], connections:[] });
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
-  const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[] });
+  const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[], tracksByDepRoute:{}, arrRoutesByTrack:{}, arrByArrRoute:{}, dbIds:{airports:{},routeSegments:{}}, departureHours:3 });
   const [simVersion,       setSimVersion]       = useState(null);
   const [plannerRevisions, setPlannerRevisions] = useState(0);
   const [selectedDep, setSelectedDep] = useState(null);
-  const [startTime,   setStartTime]   = useState('1800z');
-  const [depTimes,    setDepTimes]    = useState({});
+  const [syncTime,    setSyncTime]    = useState('1600z');
+  const syncTimer = useRef(null);
   const [newRoute,    setNewRoute]    = useState({ dep:'', depRoute:'', track:'', arrRoute:'', arr:'', value:0 });
   const [searchTerm,  setSearchTerm]  = useState('');
   const [simParams,   setSimParams]   = useState({ ...DEFAULT_SIM_PARAMS });
   const [showModal,   setShowModal]   = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [pendingMode, setPendingMode] = useState(null);
   const [toasts,      setToasts]      = useState([]);
+  const [isStaff,     setIsStaff]     = useState(false);
   const svgRef  = useRef(null);
   const gridRef = useRef(null);
   const editRef = useRef(null);
@@ -218,15 +231,26 @@ export default function SlotPlanner() {
       API.loadSlots().then(r  => r.ok ? r.json() : Promise.reject(`Slots failed (${r.status})`)),
     ])
     .then(([setup, raw]) => {
-      setSetupData({ deps: setup.deps||[], depRoutesByDep: setup.depRoutesByDep||{}, tracks: setup.tracks||[], arrRoutes: setup.arrRoutes||[], arrs: setup.arrs||[] });
+      setSetupData({
+        deps:             setup.deps||[],
+        depRoutesByDep:   setup.depRoutesByDep||{},
+        tracks:           setup.tracks||[],
+        arrRoutes:        setup.arrRoutes||[],
+        arrs:             setup.arrs||[],
+        tracksByDepRoute: setup.tracksByDepRoute||{},
+        arrRoutesByTrack: setup.arrRoutesByTrack||{},
+        arrByArrRoute:    setup.arrByArrRoute||{},
+        dbIds:            setup.dbIds||{airports:{},routeSegments:{}},
+        departureHours:   setup.departureHours||3,
+      });
+      setIsStaff(setup.isStaff ?? false);
+      if (setup.syncTime) setSyncTime(setup.syncTime);
+      setSimParams(p => ({ ...p, DepartureTimeWindowOffsetSynchronizationTimeOfDay: setup.syncTime || p.DepartureTimeWindowOffsetSynchronizationTimeOfDay }));
       const slotGroups = Array.isArray(raw) ? raw : (raw.slotGroups ?? []);
-      const caps       = (Array.isArray(raw) ? {} : raw.caps) ?? {};
-      setData(parseSlotGroups(slotGroups, caps));
+      setData(parseSlotGroups(slotGroups, setup.defaultCaps ?? {}));
       if (!Array.isArray(raw)) {
         if (raw.routesRevision   != null) setSimVersion(raw.routesRevision);
         if (raw.plannerRevisions != null) setPlannerRevisions(raw.plannerRevisions);
-        if (raw.startTime)                setStartTime(raw.startTime);
-        if (raw.depTimes)                 setDepTimes(raw.depTimes);
       }
     })
     .catch(err => addToast(String(err), 'error'))
@@ -239,25 +263,18 @@ export default function SlotPlanner() {
 
   // ── Auto-save (debounced 800 ms) ─────────────────────────────────────────
   const latestData      = useRef(data);
-  const latestStartTime = useRef(startTime);
-  const latestDepTimes  = useRef(depTimes);
-  latestData.current      = data;
-  latestStartTime.current = startTime;
-  latestDepTimes.current  = depTimes;
+  latestData.current = data;
 
   const buildPayload = useCallback((extras = {}) => ({
-    startTime:  latestStartTime.current,
-    depTimes:   { ...latestDepTimes.current },
-    caps:       snapshotCaps(latestData.current),
     slotGroups: latestData.current.connections.map(c => ({
-      id:    `${c.dep}-${c.depRoute}-${c.track}-${c.arrRoute}-${c.arr}`,
+      id:    `${c.dep}|${c.depRoute}|${c.track}|${c.arrRoute}|${c.arr}`,
       value: c.value,
     })),
     ...extras,
   }), []);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || !isStaff) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       setSaving(true);
@@ -267,7 +284,18 @@ export default function SlotPlanner() {
         .finally(() => setSaving(false));
     }, 800);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [data, startTime, depTimes, loading]);
+  }, [data, loading]);
+
+  // ── Sync time (debounced, PATCH to event) ────────────────────────────────
+  const handleSyncTimeChange = useCallback((val) => {
+    setSyncTime(val);
+    setSimParams(p => ({ ...p, DepartureTimeWindowOffsetSynchronizationTimeOfDay: val }));
+    if (!isStaff) return;
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      API.syncTime(val).catch(() => addToast('Failed to save synchronization time', 'error'));
+    }, 800);
+  }, [isStaff, addToast]);
 
   // ── Search filter ─────────────────────────────────────────────────────────
   const term = searchTerm.trim().toLowerCase();
@@ -291,47 +319,36 @@ export default function SlotPlanner() {
   const totalH  = HEADER_H + maxRows*ROW_H;
   const itemY   = (i,n) => { const rh=maxRows*ROW_H/n; return HEADER_H+rh*i+rh/2; };
 
-  // ── Dropdowns ─────────────────────────────────────────────────────────────
-    
+  // ── Dropdowns (cascading, topology-aware) ────────────────────────────────
   const ddDeps = [...new Set([
     ...setupData.deps,
     ...deps.map(d => d.id),
   ])].sort();
 
-  const ddDepRoutes = [...new Set([
-    ...Object.values(setupData.depRoutesByDep).flat(),
-    ...depRoutes.map(r => r.id),
-    ...connections.map(c => c.depRoute),
+  const ddDepRoutes = (dep) => [...new Set([
+    ...(setupData.depRoutesByDep[dep] || []),
+    ...connections.filter(c => c.dep === dep).map(c => c.depRoute),
   ])].sort();
 
-  const ddTracks = [...new Set([
-    ...setupData.tracks,
-    ...tracks.map(t => t.id),
-    ...connections.map(c => c.track),
+  const ddTracks = (depRoute) => [...new Set([
+    ...(setupData.tracksByDepRoute[depRoute] || []),
+    ...connections.filter(c => c.depRoute === depRoute).map(c => c.track),
   ])].sort();
 
-  const ddArrRoutes = [...new Set([
-    ...setupData.arrRoutes,
-    ...arrRoutes.map(r => r.id),
-    ...connections.map(c => c.arrRoute),
+  const ddArrRoutes = (track) => [...new Set([
+    ...(setupData.arrRoutesByTrack[track] || []),
+    ...connections.filter(c => c.track === track).map(c => c.arrRoute),
   ])].sort();
 
-  const ddArrs = [...new Set([
-    ...setupData.arrs,
-    ...arrs.map(a => a.id),
-    ...connections.map(c => c.arr),
-  ])].sort();
-
-  const getDepTime = (id) => depTimes[id] ?? startTime;
+  // Arrival is auto-derived from arrRoute; fall back to manual list when unknown
+  const autoArr = (arrRoute) => setupData.arrByArrRoute[arrRoute] || null;
 
   const selConnsAll = selectedDep ? connections.filter(c=>c.dep===selectedDep) : [];
   const selConns    = selectedDep ? filteredConns.filter(c=>c.dep===selectedDep) : [];
   const connLabel   = (conn) => { const i=selConnsAll.findIndex(c=>c.depRoute===conn.depRoute&&c.track===conn.track&&c.arrRoute===conn.arrRoute&&c.arr===conn.arr); return i>=0?String.fromCharCode(65+i):''; };
   const trackCol    = (id)   => tracks.find(t=>t.id===id)?.col||'#2A3B90';
 
-  const setCap = (listKey, id, val) => setData(prev => ({ ...prev, [listKey]: prev[listKey].map(item => item.id === id ? { ...item, cap: val === '' ? null : Number(val) } : item) }));
-
-  const recomputeAggregates = (prev, newConns) => {
+  const recomputeAggregates= (prev, newConns) => {
     const da={}, dra={}, ta={}, ara={}, aa={};
     newConns.forEach(c => {
       da[c.dep]=(da[c.dep]||0)+c.value; dra[c.depRoute]=(dra[c.depRoute]||0)+c.value;
@@ -367,6 +384,29 @@ export default function SlotPlanner() {
     });
   };
 
+  const setCap = useCallback((listKey, id, rawVal) => {
+    const val = rawVal === '' || rawVal == null ? null : parseInt(rawVal, 10);
+    // For airports the stored value IS the cap (maximumSlots).
+    // For non-airports the user enters per-hour; display cap = floor(perHour × hours).
+    const isAirport = listKey === 'deps' || listKey === 'arrs';
+    const displayCap = (isNaN(val) || val == null) ? null
+      : isAirport ? val
+      : Math.floor(val * setupData.departureHours);
+    setData(prev => ({
+      ...prev,
+      [listKey]: prev[listKey].map(item => item.id === id ? { ...item, cap: displayCap } : item),
+    }));
+    const numericVal = (isNaN(val) || val == null) ? 0 : val;
+    const entityType = isAirport ? 'airport' : 'routeSegment';
+    const dbId       = isAirport ? setupData.dbIds.airports[id] : setupData.dbIds.routeSegments[id];
+    if (!dbId) return;
+    apiFetch('/caps/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: entityType, id: dbId, value: numericVal }),
+    }).catch(() => addToast(`Failed to save cap for ${id}`, 'error'));
+  }, [setupData.dbIds, setupData.departureHours, addToast]);
+
   const addConnection = () => {
     const { dep, depRoute, track, arrRoute, arr, value } = newRoute;
     if (!dep||!depRoute||!track||!arrRoute||!arr) { addToast('Fill in all five fields','warning'); return; }
@@ -397,6 +437,7 @@ export default function SlotPlanner() {
         hasEdits.current = false;
         if (res?.slotGroups) setData(parseSlotGroups(res.slotGroups,res.caps??{}));
         if (res?.warning) addToast(res.warning,'warning');
+        if (res?.commentary) addToast(res.commentary,'info');
         addToast(`${mode==='calculate'?'Calculation':'Simulation'} complete — rev ${simVersion}.${nextRev}`,'success');
       })
       .catch(err=>addToast(err.message,'error'));
@@ -436,14 +477,33 @@ export default function SlotPlanner() {
 
   const liveSlots = {}; connections.forEach(c=>{liveSlots[c.track]=(liveSlots[c.track]||0)+c.value;});
   const revStr    = simVersion!==null?`${simVersion}.${plannerRevisions}`:'—';
-  const selDRIds  = [...new Set(selConnsAll.map(c=>c.depRoute))];
-  const selTrIds  = [...new Set(selConnsAll.map(c=>c.track))];
-  const selARIds  = [...new Set(selConnsAll.map(c=>c.arrRoute))];
-  const selAIds   = [...new Set(selConnsAll.map(c=>c.arr))];
 
   return (
     <div className="planner" data-theme={theme} onClick={()=>setSelectedDep(null)}>
       {loading && <div className="planner__loading">Loading…</div>}
+      {showConfirm && (
+        <div className="modal-overlay" onClick={()=>setShowConfirm(false)}>
+          <div className="modal-box" style={{maxWidth:480}} onClick={e=>e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Calculate Slots — Confirm</span>
+              <button className="modal-close" onClick={()=>setShowConfirm(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{margin:0,lineHeight:1.55,color:'var(--text-secondary)'}}>
+                This will <strong style={{color:'var(--text)'}}>replace all current slot assignments</strong> with
+                a new proposal from the simulator. Any manual adjustments in the current
+                draft will be lost. This action cannot be undone.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="planner__btn planner__btn--logout" onClick={()=>setShowConfirm(false)}>Cancel</button>
+              <button className="planner__btn planner__btn--destructive" onClick={()=>{setShowConfirm(false);setShowModal(true);}}>
+                Continue to Parameters →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showModal && <SimParamsModal mode={pendingMode} params={simParams} onParamsChange={setSimParams} onConfirm={confirmSubmit} onClose={()=>setShowModal(false)}/>}
 
       <div className="planner__toasts">
@@ -460,14 +520,19 @@ export default function SlotPlanner() {
         <a href="/" className="planner__title">CTP Slot Planner</a>
         <div className="planner__topbar-right">
           <div className="planner__start-time">
-            <span className="planner__meta-label">Start Time</span>
-            <TimeSpinner value={startTime} onChange={t=>setStartTime(t)}/>
+            <span
+              className="planner__meta-label"
+              title="The time the simulator calculates all aircraft to be at −30° longitude. Departure and arrival times are calculated relative to this synchronization point."
+              style={{cursor:'help',borderBottom:'1px dotted var(--text-muted)'}}
+            >Sync Time</span>
+            <TimeSpinner value={syncTime} onChange={handleSyncTimeChange} style={!isStaff?{pointerEvents:'none',opacity:.5}:{}}/>
           </div>
           <span className="planner__meta-label">Rev <strong className="planner__rev-value">{revStr}</strong></span>
           {saving && <span className="planner__saving-indicator">Saving…</span>}
-          <button disabled className="planner__btn" onClick={()=>{setPendingMode('calculate');setShowModal(true);}}>Calculate Slots</button>
-          <button disabled className="planner__btn planner__btn--sim" onClick={()=>{setPendingMode('simulate');setShowModal(true);}}>Simulate Slots</button>
-          <a href="/logout/" className="planner__btn planner__btn--logout">Logout</a>
+          {!isStaff && <span className="planner__readonly-badge">Read-only</span>}
+          <button disabled={!isStaff} className="planner__btn" onClick={()=>{setPendingMode('calculate');setShowConfirm(true);}}>Calculate Slots</button>
+          <button disabled={!isStaff} className="planner__btn planner__btn--sim" onClick={()=>{setPendingMode('simulate');setShowModal(true);}}>Simulate Slots</button>
+          <a href={`${import.meta.env.BASE_URL}logout/`} className="planner__btn planner__btn--logout">Logout</a>
           <button className="planner__btn planner__btn--theme" onClick={()=>setTheme(t=>t==='light'?'dark':'light')}>
             <svg className="planner__theme-icon planner__theme-icon--sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77"/></svg>
             <svg className="planner__theme-icon planner__theme-icon--moon" viewBox="0 0 24 24"><path d="M20.35 14.14A9 9 0 1 1 9.86 3.65 7 7 0 0 0 20.35 14.14z"/></svg>
@@ -488,57 +553,115 @@ export default function SlotPlanner() {
           {searchTerm && <button className="search-clear" onClick={()=>setSearchTerm('')}>✕</button>}
         </div>
         <div className="planner__control-add">
-          <select value={newRoute.dep} onChange={e=>setNewRoute(r=>({...r,dep:e.target.value,depRoute:''}))}>
+          <select disabled={!isStaff} value={newRoute.dep} onChange={e=>setNewRoute(r=>({...r,dep:e.target.value,depRoute:'',track:'',arrRoute:'',arr:''}))}>
             <option value="">Departure</option>{ddDeps.map(d=><option key={d} value={d}>{d}</option>)}
           </select>
-          <select value={newRoute.depRoute} onChange={e=>setNewRoute(r=>({...r,depRoute:e.target.value}))}>
-            <option value="">Dep Route</option>{ddDepRoutes.map(r=><option key={r} value={r}>{r}</option>)}
+          <select disabled={!isStaff} value={newRoute.depRoute} onChange={e=>setNewRoute(r=>({...r,depRoute:e.target.value,track:'',arrRoute:'',arr:''}))}>
+            <option value="">Dep Route</option>{ddDepRoutes(newRoute.dep).map(r=><option key={r} value={r}>{r}</option>)}
           </select>
-          <select value={newRoute.track} onChange={e=>setNewRoute(r=>({...r,track:e.target.value}))}>
-            <option value="">Track</option>{ddTracks.map(t=><option key={t} value={t}>{t}</option>)}
+          <select disabled={!isStaff} value={newRoute.track} onChange={e=>setNewRoute(r=>({...r,track:e.target.value,arrRoute:'',arr:''}))}>
+            <option value="">Track</option>{ddTracks(newRoute.depRoute).map(t=><option key={t} value={t}>{t}</option>)}
           </select>
-          <select value={newRoute.arrRoute} onChange={e=>setNewRoute(r=>({...r,arrRoute:e.target.value}))}>
-            <option value="">Arr Route</option>{ddArrRoutes.map(r=><option key={r} value={r}>{r}</option>)}
+          <select disabled={!isStaff} value={newRoute.arrRoute} onChange={e=>{const ar=e.target.value;setNewRoute(r=>({...r,arrRoute:ar,arr:autoArr(ar)||''}));}}>
+            <option value="">Arr Route</option>{ddArrRoutes(newRoute.track).map(r=><option key={r} value={r}>{r}</option>)}
           </select>
-          <select value={newRoute.arr} onChange={e=>setNewRoute(r=>({...r,arr:e.target.value}))}>
-            <option value="">Arrival</option>{ddArrs.map(a=><option key={a} value={a}>{a}</option>)}
+          <select disabled={!isStaff || !!autoArr(newRoute.arrRoute)} value={newRoute.arr} onChange={e=>setNewRoute(r=>({...r,arr:e.target.value}))}>
+            <option value="">{autoArr(newRoute.arrRoute) ? autoArr(newRoute.arrRoute) : 'Arrival'}</option>
+            {!autoArr(newRoute.arrRoute) && [...new Set([...setupData.arrs,...arrs.map(a=>a.id)])].sort().map(a=><option key={a} value={a}>{a}</option>)}
           </select>
-          <input className="planner__ctrl-num" type="number" min={0} value={newRoute.value} onChange={e=>setNewRoute(r=>({...r,value:parseInt(e.target.value)||0}))}/>
-          <button className="planner__btn" onClick={addConnection}>Add</button>
+          <input disabled={!isStaff} className="planner__ctrl-num" type="number" min={0} value={newRoute.value} onChange={e=>setNewRoute(r=>({...r,value:parseInt(e.target.value)||0}))}/>
+          <button disabled={!isStaff} className="planner__btn" onClick={addConnection}>Add</button>
         </div>
 
         {selectedDep && selConns.length > 0 && (
           <div className="planner__brace-section">
             <div className="planner__brace-col" style={{width:BRACE_COL_W,minHeight:braceHeight}}>
-              <TimeSpinner value={getDepTime(selectedDep)} onChange={t=>setDepTimes(p=>({...p,[selectedDep]:t}))} className="planner__brace-time" style={{top:Math.max(0,braceHeight/2-28)}}/>
               <div className="planner__brace-svg-wrap"><CurlyBrace height={braceHeight}/></div>
             </div>
             <div className="planner__control-edit" ref={editRef}>
               {selConns.map(c => (
-                <div key={`${c.depRoute}-${c.track}-${c.arrRoute}-${c.arr}`} className="planner__control-row">
-                  <span className="planner__conn-label" style={{background:trackCol(c.track)}}>{connLabel(c)}</span>
-                  <select value={c.depRoute} onChange={e=>editConn(c,'depRoute',e.target.value)}>
-                    {ddDepRoutes.map(r => (
+                <div key={`${c.depRoute}-${c.track}-${c.arrRoute}-${c.arr}`} className="planner__control-row">                  <span className="planner__conn-label" style={{background:trackCol(c.track)}}>{connLabel(c)}</span>
+                  <select disabled={!isStaff} value={c.depRoute} onChange={e=>editConn(c,'depRoute',e.target.value)}>
+                    {ddDepRoutes(selectedDep).map(r => (
                       <option key={r} value={r}>{r}</option>
                     ))}
-                  </select>                  <select value={c.track}    onChange={e=>editConn(c,'track',e.target.value)}>{ddTracks.map(t=><option key={t} value={t}>{t}</option>)}</select>
-                  <select value={c.arrRoute} onChange={e=>editConn(c,'arrRoute',e.target.value)}>{ddArrRoutes.map(r=><option key={r} value={r}>{r}</option>)}</select>
-                  <select value={c.arr}      onChange={e=>editConn(c,'arr',e.target.value)}>{ddArrs.map(a=><option key={a} value={a}>{a}</option>)}</select>
-                  <input className="planner__ctrl-num" type="number" value={c.value} onChange={e=>editConn(c,'value',parseInt(e.target.value)||0)}/>
-                  <button className="planner__slot-btn planner__slot-btn--remove" onClick={()=>removeConnection(c)}>✕</button>
+                  </select>
+                  <select disabled={!isStaff} value={c.track} onChange={e=>editConn(c,'track',e.target.value)}>{ddTracks(c.depRoute).map(t=><option key={t} value={t}>{t}</option>)}</select>
+                  <select disabled={!isStaff} value={c.arrRoute} onChange={e=>{const ar=e.target.value;editConn(c,'arrRoute',ar);const a=autoArr(ar);if(a)setData(prev=>{const newConns=prev.connections.map(x=>x===c?{...x,arrRoute:ar,arr:a}:x);return recomputeAggregates(prev,newConns);});}}>{ddArrRoutes(c.track).map(r=><option key={r} value={r}>{r}</option>)}</select>
+                  <select disabled={!isStaff || !!autoArr(c.arrRoute)} value={c.arr} onChange={e=>editConn(c,'arr',e.target.value)}>
+                    <option value={c.arr}>{c.arr}</option>
+                    {!autoArr(c.arrRoute) && [...new Set([...setupData.arrs,...arrs.map(a=>a.id)])].sort().filter(a=>a!==c.arr).map(a=><option key={a} value={a}>{a}</option>)}
+                  </select>
+                  <input disabled={!isStaff} className="planner__ctrl-num" type="number" value={c.value} onChange={e=>editConn(c,'value',parseInt(e.target.value)||0)}/>
+                  <button disabled={!isStaff} className="planner__slot-btn planner__slot-btn--remove" onClick={()=>removeConnection(c)}>✕</button>
                 </div>
               ))}
-              <div className="planner__cap-editor">
-                <span className="planner__cap-editor-title">Capacity caps</span>
-                <div className="planner__cap-grid">
-                  <span className="planner__cap-key">Dep {selectedDep}</span>
-                  <input className="planner__cap-input" type="number" min={0} placeholder="—" value={deps.find(d=>d.id===selectedDep)?.cap??''} onChange={e=>setCap('deps',selectedDep,e.target.value)}/>
-                  {selDRIds.map(id=><><span key={`l-${id}`} className="planner__cap-key">{id}</span><input key={`i-${id}`} className="planner__cap-input" type="number" min={0} placeholder="—" value={depRoutes.find(r=>r.id===id)?.cap??''} onChange={e=>setCap('depRoutes',id,e.target.value)}/></>)}
-                  {selTrIds.map(id=><><span key={`l-${id}`} className="planner__cap-key">Track {id}</span><input key={`i-${id}`} className="planner__cap-input" type="number" min={0} placeholder="—" value={tracks.find(t=>t.id===id)?.cap??''} onChange={e=>setCap('tracks',id,e.target.value)}/></>)}
-                  {selARIds.map(id=><><span key={`l-${id}`} className="planner__cap-key">{id}</span><input key={`i-${id}`} className="planner__cap-input" type="number" min={0} placeholder="—" value={arrRoutes.find(r=>r.id===id)?.cap??''} onChange={e=>setCap('arrRoutes',id,e.target.value)}/></>)}
-                  {selAIds.map(id=><><span key={`l-${id}`} className="planner__cap-key">Arr {id}</span><input key={`i-${id}`} className="planner__cap-input" type="number" min={0} placeholder="—" value={arrs.find(a=>a.id===id)?.cap??''} onChange={e=>setCap('arrs',id,e.target.value)}/></>)}
-                </div>
-              </div>
+            </div>
+          </div>
+        )}
+
+        {selectedDep && (
+          <div className="planner__cap-editor" onClick={e=>e.stopPropagation()}>
+            <span className="planner__cap-editor-title">
+              Caps — airports: total slots · routes/tracks: per hour ×{setupData.departureHours}h = total
+            </span>
+            <div className="planner__cap-grid">
+              {deps.filter(d=>d.id===selectedDep).map(d=>(
+                <React.Fragment key={d.id}>
+                  <span className="planner__cap-key">Dep: {d.id} <em style={{fontWeight:400,color:'var(--text-muted)'}}>slots</em></span>
+                  <input className="planner__cap-input" type="number" min={0} value={d.cap??''} placeholder="∞"
+                    disabled={!isStaff} onChange={e=>setCap('deps',d.id,e.target.value)}/>
+                </React.Fragment>
+              ))}
+              {[...new Set(selConnsAll.map(c=>c.depRoute))].sort().map(rId=>{
+                const r=depRoutes.find(x=>x.id===rId); if(!r) return null;
+                const perHr = r.cap!=null ? Math.round(r.cap/setupData.departureHours) : '';
+                return (
+                  <React.Fragment key={r.id}>
+                    <span className="planner__cap-key">Route: {r.id} <em style={{fontWeight:400,color:'var(--text-muted)'}}>
+                      /hr{r.cap!=null?` · ${r.cap} total`:''}
+                    </em></span>
+                    <input className="planner__cap-input" type="number" min={0} value={perHr} placeholder="∞"
+                      disabled={!isStaff} onChange={e=>setCap('depRoutes',r.id,e.target.value)}/>
+                  </React.Fragment>
+                );
+              })}
+              {[...new Set(selConnsAll.map(c=>c.track))].sort().map(tId=>{
+                const t=tracks.find(x=>x.id===tId); if(!t) return null;
+                const perHr = t.cap!=null ? Math.round(t.cap/setupData.departureHours) : '';
+                return (
+                  <React.Fragment key={t.id}>
+                    <span className="planner__cap-key" style={{color:t.col}}>Track: {t.id} <em style={{fontWeight:400,color:'var(--text-muted)'}}>
+                      /hr{t.cap!=null?` · ${t.cap} total`:''}
+                    </em></span>
+                    <input className="planner__cap-input" type="number" min={0} value={perHr} placeholder="∞"
+                      disabled={!isStaff} onChange={e=>setCap('tracks',t.id,e.target.value)}/>
+                  </React.Fragment>
+                );
+              })}
+              {[...new Set(selConnsAll.map(c=>c.arrRoute))].sort().map(rId=>{
+                const r=arrRoutes.find(x=>x.id===rId); if(!r) return null;
+                const perHr = r.cap!=null ? Math.round(r.cap/setupData.departureHours) : '';
+                return (
+                  <React.Fragment key={r.id}>
+                    <span className="planner__cap-key">ArrRte: {r.id} <em style={{fontWeight:400,color:'var(--text-muted)'}}>
+                      /hr{r.cap!=null?` · ${r.cap} total`:''}
+                    </em></span>
+                    <input className="planner__cap-input" type="number" min={0} value={perHr} placeholder="∞"
+                      disabled={!isStaff} onChange={e=>setCap('arrRoutes',r.id,e.target.value)}/>
+                  </React.Fragment>
+                );
+              })}
+              {[...new Set(selConnsAll.map(c=>c.arr))].sort().map(aId=>{
+                const a=arrs.find(x=>x.id===aId); if(!a) return null;
+                return (
+                  <React.Fragment key={a.id}>
+                    <span className="planner__cap-key">Arr: {a.id} <em style={{fontWeight:400,color:'var(--text-muted)'}}>slots</em></span>
+                    <input className="planner__cap-input" type="number" min={0} value={a.cap??''} placeholder="∞"
+                      disabled={!isStaff} onChange={e=>setCap('arrs',a.id,e.target.value)}/>
+                  </React.Fragment>
+                );
+              })}
             </div>
           </div>
         )}
@@ -553,7 +676,7 @@ export default function SlotPlanner() {
           <div className="planner__header">Departure</div>
           {vDeps.map(dep => { const isSel=selectedDep===dep.id; const dData=deps.find(d=>d.id===dep.id); return (
             <div key={dep.id} className={`planner__cell planner__cell--dep${isSel?' planner__cell--selected':''}${!isSel&&selectedDep?' planner__cell--dimmed':''}`} style={{height:maxRows*ROW_H/vDeps.length}} onClick={e=>{e.stopPropagation();setSelectedDep(isSel?null:dep.id);}}>
-              <div className="planner__cell-dep-info"><span className="planner__cell-name">{dep.id}</span><span className="planner__dep-time-label">{getDepTime(dep.id)}</span></div>
+              <div className="planner__cell-dep-info"><span className="planner__cell-name">{dep.id}</span></div>
               <div className="planner__cell-dep-right">
                 <QuantityLabel used={dData?.value??0} cap={dData?.cap} size="lg"/>
                 {isSel && selConnsAll.length>0 && <div className="planner__label-cluster">{selConnsAll.map((c,i)=><span key={i} className="planner__conn-label" style={{background:trackCol(c.track)}}>{String.fromCharCode(65+i)}</span>)}</div>}
@@ -569,7 +692,7 @@ export default function SlotPlanner() {
             <div key={route.id} className="planner__route-row" style={{height:maxRows*ROW_H/oDR.length,opacity}} onClick={e=>e.stopPropagation()}>
               <span className="planner__route-name">{route.id}</span>
               <div className="planner__route-right">
-                {rc.map(c=><span key={`${c.track}-${c.arrRoute}`} className="planner__conn-label planner__conn-label--rm" style={{background:trackCol(c.track)}} onClick={e=>{e.stopPropagation();removeConnection(c);}}>{connLabel(c)}</span>)}
+                {rc.map(c=><span key={`${c.track}-${c.arrRoute}`} className={`planner__conn-label${isStaff?' planner__conn-label--rm':''}`} style={{background:trackCol(c.track)}} onClick={e=>{if(!isStaff)return;e.stopPropagation();removeConnection(c);}}>{connLabel(c)}</span>)}
                 <QuantityLabel used={route.value} cap={route.cap} size="md"/>
               </div>
             </div>
@@ -601,7 +724,7 @@ export default function SlotPlanner() {
             <div key={route.id} className="planner__route-row" style={{height:maxRows*ROW_H/oAR.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
               <span className="planner__route-name">{route.id}</span>
               <div className="planner__route-right">
-                {rc.map(c=><span key={`${c.track}-${c.depRoute}`} className="planner__conn-label planner__conn-label--rm" style={{background:trackCol(c.track)}} onClick={e=>{e.stopPropagation();removeConnection(c);}}>{connLabel(c)}</span>)}
+                {rc.map(c=><span key={`${c.track}-${c.depRoute}`} className={`planner__conn-label${isStaff?' planner__conn-label--rm':''}`} style={{background:trackCol(c.track)}} onClick={e=>{if(!isStaff)return;e.stopPropagation();removeConnection(c);}}>{connLabel(c)}</span>)}
                 <QuantityLabel used={route.value} cap={route.cap} size="md"/>
               </div>
             </div>
