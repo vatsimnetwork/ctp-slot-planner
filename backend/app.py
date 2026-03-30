@@ -169,9 +169,19 @@ def save_slotgroups():
     try:
         latest = ctp_api.get_latest_slot_revision()
         if latest:
-            ctp_api.update_slot_revision(latest["id"], {
-                "slotGenerationOutputCommentary": commentary,
-            })
+            existing = _parse_commentary(latest.get("slotGenerationOutputCommentary", ""))
+            if existing and existing.get("draft"):
+                # Safe to overwrite — this is a draft revision
+                ctp_api.update_slot_revision(latest["id"], {
+                    "slotGenerationOutputCommentary": commentary,
+                })
+            else:
+                # Latest revision is a sim/calc revision — don't overwrite it,
+                # create a new draft instead so we don't corrupt simulator output
+                ctp_api.create_slot_revision(metadata={
+                    "eventId":                        ctp_api.event_id(),
+                    "slotGenerationOutputCommentary": commentary,
+                })
         else:
             ctp_api.create_slot_revision(metadata={
                 "eventId":                        ctp_api.event_id(),

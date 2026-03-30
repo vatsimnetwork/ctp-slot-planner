@@ -199,6 +199,7 @@ export default function SlotPlanner() {
   const [colPositions, setColPositions] = useState(null);
   const [braceHeight,  setBraceHeight]  = useState(0);
   const saveTimer = useRef(null);
+  const isSubmitting = useRef(false);
 
   
   const hasEdits = useRef(false);
@@ -262,9 +263,10 @@ export default function SlotPlanner() {
   }), []);
 
   useEffect(() => {
-    if (loading || !isStaff) return;
+    if (loading || !isStaff || isSubmitting.current) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
+      if (isSubmitting.current) return;
       setSaving(true);
       API.save(buildPayload())
         .then(r => r.ok ? null : Promise.reject(`Auto-save failed (${r.status})`))
@@ -419,6 +421,10 @@ export default function SlotPlanner() {
     setShowModal(false);
     const mode = pendingMode;
     const nextRev = hasEdits.current ? plannerRevisions + 1 : plannerRevisions;
+    // Cancel any pending auto-save and block new ones while the submit is in flight
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    isSubmitting.current = true;
+    setSaving(false);
     API.submit(buildPayload({mode, plannerRevisions: nextRev, simulatorParams: simParams}))
       .then(r=>r.ok?r.json():Promise.reject(new Error(`${mode} failed (${r.status})`)))
       .then(res=>{
@@ -429,7 +435,8 @@ export default function SlotPlanner() {
         if (res?.commentary) addToast(res.commentary,'info');
         addToast(`${mode==='calculate'?'Calculation':'Simulation'} complete — rev ${simVersion}.${nextRev}`,'success');
       })
-      .catch(err=>addToast(err.message,'error'));
+      .catch(err=>addToast(err.message,'error'))
+      .finally(() => { isSubmitting.current = false; });
   };
 
   // ── Layout effects ────────────────────────────────────────────────────────
