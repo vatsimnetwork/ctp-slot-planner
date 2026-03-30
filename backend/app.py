@@ -152,6 +152,7 @@ def setup():
         "sectorMap": sector_map,
         "tagLimits": tag_limits,
         "sectorLimits": sector_limits,
+        "eventId": ctp_api.event_id(),
     })
 
 

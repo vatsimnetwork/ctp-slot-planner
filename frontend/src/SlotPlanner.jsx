@@ -314,6 +314,7 @@ export default function SlotPlanner() {
   const [data, setData]   = useState({ deps:[], depRoutes:[], tracks:[], arrRoutes:[], arrs:[], connections:[] });
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
+  const [simStatus, setSimStatus] = useState(null); // null | 'running' | 'sim_responded' | 'saved'
   const [activeTab, setActiveTab] = useState('planner');
   const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[], tracksByDepRoute:{}, arrRoutesByTrack:{}, arrByArrRoute:{}, dbIds:{airports:{},routeSegments:{}}, departureHours:3, defaultCaps:{deps:{},depRoutes:{},tracks:{},arrRoutes:{},arrs:{}}, tagMap:{}, sectorMap:{}, tagLimits:[], sectorLimits:[] });
   const [simVersion,       setSimVersion]       = useState(null);
@@ -336,8 +337,9 @@ export default function SlotPlanner() {
   const [braceHeight,  setBraceHeight]  = useState(0);
   const saveTimer = useRef(null);
   const isSubmitting = useRef(false);
+  const eventIdRef = useRef(null);
+  const simPollRef = useRef(null);
 
-  
   const hasEdits = useRef(false);
 
   const addToast = useCallback((msg, type='error') => {
@@ -374,6 +376,7 @@ export default function SlotPlanner() {
       });
       setIsStaff(setup.isStaff ?? false);
       if (setup.syncTime) setSyncTime(setup.syncTime);
+      if (setup.eventId)  eventIdRef.current = setup.eventId;
       setSimParams(p => ({ ...p, DepartureTimeWindowOffsetSynchronizationTimeOfDay: setup.syncTime || p.DepartureTimeWindowOffsetSynchronizationTimeOfDay }));
       const slotGroups = Array.isArray(raw) ? raw : (raw.slotGroups ?? []);
       setData(parseSlotGroups(slotGroups, setup.defaultCaps ?? {}));
@@ -584,6 +587,30 @@ export default function SlotPlanner() {
   };
 
   // ── Submit ────────────────────────────────────────────────────────────────
+  const startSimPoll = () => {
+    const eid = eventIdRef.current;
+    if (!eid) return;
+    let lastStatus = null;
+    simPollRef.current = setInterval(() => {
+      fetch(`/api/events/${eid}/simulate-status`, { credentials: 'include' })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (!d) return;
+          const s = d.status;
+          if (s === lastStatus) return;
+          lastStatus = s;
+          setSimStatus(s);
+          if (s === 'sim_responded') addToast('Simulator responded — saving slot times…', 'info');
+          if (s === 'saved') addToast('Slot times saved — draft revision created', 'info');
+        })
+        .catch(() => {});
+    }, 1200);
+  };
+  const stopSimPoll = () => {
+    if (simPollRef.current) { clearInterval(simPollRef.current); simPollRef.current = null; }
+    setSimStatus(null);
+  };
+
   const confirmSubmit = () => {
     setShowModal(false);
     const mode = pendingMode;
@@ -592,6 +619,7 @@ export default function SlotPlanner() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     isSubmitting.current = true;
     setSaving(false);
+    if (mode === 'simulate') { setSimStatus('running'); startSimPoll(); }
     API.submit(buildPayload({mode, plannerRevisions: nextRev, simulatorParams: simParams}))
       .then(r=>r.ok?r.json():Promise.reject(new Error(`${mode} failed (${r.status})`)))
       .then(res=>{
@@ -603,7 +631,7 @@ export default function SlotPlanner() {
         addToast(`${mode==='calculate'?'Calculation':'Simulation'} complete — rev ${simVersion}.${nextRev}`,'success');
       })
       .catch(err=>addToast(err.message,'error'))
-      .finally(() => { isSubmitting.current = false; });
+      .finally(() => { isSubmitting.current = false; if (mode === 'simulate') stopSimPoll(); });
   };
 
   // ── Layout effects ────────────────────────────────────────────────────────
@@ -696,6 +724,9 @@ export default function SlotPlanner() {
           </div>
           <span className="planner__meta-label">Rev <strong className="planner__rev-value">{revStr}</strong></span>
           {saving && <span className="planner__saving-indicator">Saving…</span>}
+          {simStatus === 'running'      && <span className="planner__sim-status planner__sim-status--running">Running simulator…</span>}
+          {simStatus === 'sim_responded'&& <span className="planner__sim-status planner__sim-status--saving">Saving slot times…</span>}
+          {simStatus === 'saved'        && <span className="planner__sim-status planner__sim-status--done">Finalizing…</span>}
           {!isStaff && <span className="planner__readonly-badge">Read-only</span>}
           <button disabled={!isStaff} className="planner__btn" onClick={()=>{setPendingMode('calculate');setShowConfirm(true);}}>Calculate Slots</button>
           <button disabled={!isStaff} className="planner__btn planner__btn--sim" onClick={()=>{setPendingMode('simulate');setShowModal(true);}}>Simulate Slots</button>
