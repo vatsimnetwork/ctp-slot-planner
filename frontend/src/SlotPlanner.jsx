@@ -192,7 +192,7 @@ export default function SlotPlanner() {
   const [data, setData]   = useState({ deps:[], depRoutes:[], tracks:[], arrRoutes:[], arrs:[], connections:[] });
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
-  const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[], tracksByDepRoute:{}, arrRoutesByTrack:{}, arrByArrRoute:{}, dbIds:{airports:{},routeSegments:{}}, departureHours:3 });
+  const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[], tracksByDepRoute:{}, arrRoutesByTrack:{}, arrByArrRoute:{}, dbIds:{airports:{},routeSegments:{}}, departureHours:3, defaultCaps:{deps:{},depRoutes:{},tracks:{},arrRoutes:{},arrs:{}} });
   const [simVersion,       setSimVersion]       = useState(null);
   const [plannerRevisions, setPlannerRevisions] = useState(0);
   const [selectedDep, setSelectedDep] = useState(null);
@@ -242,6 +242,7 @@ export default function SlotPlanner() {
         arrByArrRoute:    setup.arrByArrRoute||{},
         dbIds:            setup.dbIds||{airports:{},routeSegments:{}},
         departureHours:   setup.departureHours||3,
+        defaultCaps:      setup.defaultCaps||{deps:{},depRoutes:{},tracks:{},arrRoutes:{},arrs:{}},
       });
       setIsStaff(setup.isStaff ?? false);
       if (setup.syncTime) setSyncTime(setup.syncTime);
@@ -411,13 +412,14 @@ export default function SlotPlanner() {
     const { dep, depRoute, track, arrRoute, arr, value } = newRoute;
     if (!dep||!depRoute||!track||!arrRoute||!arr) { addToast('Fill in all five fields','warning'); return; }
     if (data.connections.some(c=>c.dep===dep&&c.depRoute===depRoute&&c.track===track&&c.arrRoute===arrRoute&&c.arr===arr)) { addToast('Connection already exists','warning'); return; }
+    const dc = setupData.defaultCaps || {};
     setData(prev => {
       const newConns = [...prev.connections,{dep,depRoute,track,arrRoute,arr,value}];
-      const ensureDep = prev.deps.some(d=>d.id===dep)?prev.deps:[...prev.deps,{id:dep,value:0,cap:null}];
-      const ensureDR  = prev.depRoutes.some(r=>r.id===depRoute)?prev.depRoutes:[...prev.depRoutes,{id:depRoute,value:0,cap:null,selected:true}];
-      const ensureTr  = prev.tracks.some(t=>t.id===track)?prev.tracks:[...prev.tracks,{id:track,col:TRACK_COLS[prev.tracks.length%TRACK_COLS.length],slots:0,cap:null}];
-      const ensureAR  = prev.arrRoutes.some(r=>r.id===arrRoute)?prev.arrRoutes:[...prev.arrRoutes,{id:arrRoute,value:0,cap:null,selected:true}];
-      const ensureArr = prev.arrs.some(a=>a.id===arr)?prev.arrs:[...prev.arrs,{id:arr,value:0,cap:null}];
+      const ensureDep = prev.deps.some(d=>d.id===dep)?prev.deps:[...prev.deps,{id:dep,value:0,cap:dc.deps?.[dep]??null}];
+      const ensureDR  = prev.depRoutes.some(r=>r.id===depRoute)?prev.depRoutes:[...prev.depRoutes,{id:depRoute,value:0,cap:dc.depRoutes?.[depRoute]??null,selected:true}];
+      const ensureTr  = prev.tracks.some(t=>t.id===track)?prev.tracks:[...prev.tracks,{id:track,col:TRACK_COLS[prev.tracks.length%TRACK_COLS.length],slots:0,cap:dc.tracks?.[track]??null}];
+      const ensureAR  = prev.arrRoutes.some(r=>r.id===arrRoute)?prev.arrRoutes:[...prev.arrRoutes,{id:arrRoute,value:0,cap:dc.arrRoutes?.[arrRoute]??null,selected:true}];
+      const ensureArr = prev.arrs.some(a=>a.id===arr)?prev.arrs:[...prev.arrs,{id:arr,value:0,cap:dc.arrs?.[arr]??null}];
       const da={},dra={},ta={},ara={},aa={};
       newConns.forEach(c=>{da[c.dep]=(da[c.dep]||0)+c.value;dra[c.depRoute]=(dra[c.depRoute]||0)+c.value;ta[c.track]=(ta[c.track]||0)+c.value;ara[c.arrRoute]=(ara[c.arrRoute]||0)+c.value;aa[c.arr]=(aa[c.arr]||0)+c.value;});
       return { deps:ensureDep.map(d=>({...d,value:da[d.id]||0})), depRoutes:ensureDR.map(r=>({...r,value:dra[r.id]||0})), tracks:ensureTr.map(t=>({...t,slots:ta[t.id]||0})), arrRoutes:ensureAR.map(r=>({...r,value:ara[r.id]||0})), arrs:ensureArr.map(a=>({...a,value:aa[a.id]||0})), connections:newConns };
