@@ -1,10 +1,11 @@
 # ── Stage 1: Build React frontend ─────────────────────────────────────────────
 FROM node:22-alpine AS frontend-build
+ARG BASE_PATH=/slots/
 WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
-RUN npm run build
+RUN BASE_PATH=${BASE_PATH} npm run build
 
 # ── Stage 2: Python runtime ────────────────────────────────────────────────────
 FROM python:3.12-slim

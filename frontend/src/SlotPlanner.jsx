@@ -31,7 +31,7 @@ const DEFAULT_SIM_PARAMS = {
 const BASE = import.meta.env.BASE_URL;
 async function apiFetch(url, options = {}) {
   const res = await fetch(BASE + url.replace(/^\//, ''), { ...options, credentials: 'include' });
-  if (res.status === 401) { window.location.href = BASE + 'login/'; throw new Error('Unauthorized'); }
+  if (res.status === 401) { window.location.href = BASE + 'login/?return_to=' + encodeURIComponent(window.location.pathname + window.location.search); throw new Error('Unauthorized'); }
   return res;
 }
 const API = {

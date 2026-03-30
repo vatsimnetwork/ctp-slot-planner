@@ -15,6 +15,8 @@ app = Flask(__name__, static_folder='frontend_dist', static_url_path='')
 CORS(app, supports_credentials=True, resources={r"/*": {"origins": "*"}})
 
 DEBUG = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+AUTH_PUBLIC_URL = os.environ.get("AUTH_PUBLIC_URL", "").rstrip("/")
+SELF_PUBLIC_PATH = os.environ.get("BASE_PATH", "/slots/").rstrip("/")
 
 
 # ─── Auth helpers ─────────────────────────────────────────────────────────────
@@ -556,6 +558,19 @@ def _derive_slot_groups_from_slots(slots: list, route_segments: list, airports: 
         counts[group_id] = counts.get(group_id, 0) + 1
 
     return [{"id": gid, "value": v} for gid, v in sorted(counts.items())]
+
+
+# ── Auth redirects ────────────────────────────────────────────────────────────
+
+@app.get("/login/")
+def login():
+    return_to = request.args.get("return_to", SELF_PUBLIC_PATH + "/")
+    return redirect(f"{AUTH_PUBLIC_URL}/auth/redirect?return_to={return_to}")
+
+
+@app.get("/logout/")
+def logout():
+    return redirect(f"{AUTH_PUBLIC_URL}/auth/logout?return_to={SELF_PUBLIC_PATH}/")
 
 
 # ── Frontend SPA ──────────────────────────────────────────────────────────────
