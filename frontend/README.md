@@ -2,7 +2,7 @@
 Overall design improvement, plus allows editing of slots, plus adding slots. 
 
 # Note
-This still needs to be tested with recieveing data from a backend...
+This still needs to be tested with recieving data from a backend...
 
 # React + Vite
 
