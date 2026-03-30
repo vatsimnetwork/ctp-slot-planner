@@ -141,7 +141,7 @@ function SimParamsModal({ mode, params, onParamsChange, onConfirm, onClose }) {
           <div className="modal-section-title">Slot Generation</div>
           <label className="modal-row"><span className="modal-label">Slot Generation Mode</span>
             <select className="modal-select" value={params.IntendedSlotGenerationMode} onChange={e=>set('IntendedSlotGenerationMode',e.target.value)}>
-              <option value="MaximizeSlots">Maximize Slots</option><option value="Random">Random</option>
+              <option value="MaximizeSlots">Maximize Slots</option><option value="VoteProportional">Vote Proportional</option><option value="Random">Random</option>
             </select></label>
           <label className="modal-row modal-row--check"><input type="checkbox" checked={params.RecalculateMaximumAirportSlots} onChange={e=>set('RecalculateMaximumAirportSlots',e.target.checked)}/><span className="modal-label">Recalculate Maximum Airport Slots</span></label>
           <div className="modal-section-title">Simulation</div>

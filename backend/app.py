@@ -197,7 +197,7 @@ def submit_slotgroups():
     sim_params = body.get("simulatorParams", {})
 
     # The Go API stores these as int enums (iota); the frontend sends the string names.
-    _SLOT_GENERATION_MODE = {"MaximizeSlots": 0, "Random": 1}
+    _SLOT_GENERATION_MODE = {"MaximizeSlots": 0, "Random": 1, "VoteProportional": 2}
     _DTW_OFFSETS_MODE     = {"None": 0, "EarliestRoutes": 1, "LatestRoutes": 2, "RouteAverage": 3}
     _WAYPOINT_TP_MODE     = {"None": 0, "FirstWaypointsOfNATRouteSegmentsOnly": 1, "AllWaypoints": 2}
 
