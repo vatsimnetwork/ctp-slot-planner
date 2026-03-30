@@ -223,3 +223,8 @@
 .throughput-limits__input:focus { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-subtle); }
 .throughput-limits__input:disabled { opacity:.5; cursor:not-allowed; }
 .throughput-limits__footer { margin-top:24px; }
+.throughput-limits__search-wrap { position:relative; margin-bottom:10px; }
+.throughput-limits__search { font-family:inherit; font-size:13px; font-weight:500; color:var(--text); background:var(--bg); border:1.5px solid var(--border); border-radius:7px; padding:6px 30px 6px 10px; width:100%; box-sizing:border-box; outline:none; transition:border-color .14s,box-shadow .14s; }
+.throughput-limits__search:focus { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-subtle); }
+.throughput-limits__search-clear { position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px; padding:2px 4px; line-height:1; }
+.throughput-limits__search-clear:hover { color:var(--text); }

@@ -181,6 +181,8 @@ function ThroughputLimitsPage({ isStaff, addToast }) {
   const [sectors,   setSectors]   = useState([]);
   const [saving,    setSaving]    = useState(false);
   const [loaded,    setLoaded]    = useState(false);
+  const [tagSearch,    setTagSearch]    = useState('');
+  const [sectorSearch, setSectorSearch] = useState('');
 
   useEffect(() => {
     API.loadThroughputLimits()
@@ -212,18 +214,33 @@ function ThroughputLimitsPage({ isStaff, addToast }) {
 
   if (!loaded) return <div className="planner__loading">Loading…</div>;
 
+  const tagQ    = tagSearch.trim().toLowerCase();
+  const secQ    = sectorSearch.trim().toLowerCase();
+  const visibleTags    = tagQ    ? tagLimits.filter(t => t.tag.toLowerCase().includes(tagQ))       : tagLimits;
+  const visibleSectors = secQ    ? sectors.filter(s => s.identifier.toLowerCase().includes(secQ))  : sectors;
+
   return (
     <div className="throughput-limits">
       <div className="throughput-limits__tables">
         <div className="throughput-limits__table-wrap">
           <h3 className="throughput-limits__heading">Tag Limits</h3>
-          {tagLimits.length === 0
-            ? <p className="throughput-limits__empty">No tags found on any route for this event.</p>
+          <div className="throughput-limits__search-wrap">
+            <input
+              className="throughput-limits__search"
+              type="text"
+              placeholder="Search tags…"
+              value={tagSearch}
+              onChange={e => setTagSearch(e.target.value)}
+            />
+            {tagSearch && <button className="throughput-limits__search-clear" onClick={() => setTagSearch('')}>✕</button>}
+          </div>
+          {visibleTags.length === 0
+            ? <p className="throughput-limits__empty">{tagSearch ? 'No matching tags.' : 'No tags found on any route for this event.'}</p>
             : (
               <table className="throughput-limits__table">
                 <thead><tr><th>Tag</th><th>Max / Hour</th></tr></thead>
                 <tbody>
-                  {tagLimits.map(t => (
+                  {visibleTags.map(t => (
                     <tr key={t.tag}>
                       <td>{t.tag}</td>
                       <td>
@@ -244,13 +261,23 @@ function ThroughputLimitsPage({ isStaff, addToast }) {
         </div>
         <div className="throughput-limits__table-wrap">
           <h3 className="throughput-limits__heading">Sector Limits</h3>
-          {sectors.length === 0
-            ? <p className="throughput-limits__empty">No sectors found for this event.</p>
+          <div className="throughput-limits__search-wrap">
+            <input
+              className="throughput-limits__search"
+              type="text"
+              placeholder="Search sectors…"
+              value={sectorSearch}
+              onChange={e => setSectorSearch(e.target.value)}
+            />
+            {sectorSearch && <button className="throughput-limits__search-clear" onClick={() => setSectorSearch('')}>✕</button>}
+          </div>
+          {visibleSectors.length === 0
+            ? <p className="throughput-limits__empty">{sectorSearch ? 'No matching sectors.' : 'No sectors found for this event.'}</p>
             : (
               <table className="throughput-limits__table">
                 <thead><tr><th>Sector</th><th>Max Slots</th></tr></thead>
                 <tbody>
-                  {sectors.map(s => (
+                  {visibleSectors.map(s => (
                     <tr key={s.id}>
                       <td>{s.identifier}</td>
                       <td>
@@ -584,7 +611,7 @@ export default function SlotPlanner() {
     if (!gridRef.current) return;
     const update = () => { const cr=gridRef.current.getBoundingClientRect(); const rects=Array.from(gridRef.current.querySelectorAll('.col')).map(c=>{const r=c.getBoundingClientRect();return{left:r.left-cr.left,right:r.right-cr.left};}); setColPositions({rects,totalWidth:cr.width}); };
     update(); window.addEventListener('resize',update); return ()=>window.removeEventListener('resize',update);
-  }, [data, searchTerm]);
+  }, [data, searchTerm, activeTab]);
   useLayoutEffect(()=>{ if(editRef.current) setBraceHeight(editRef.current.offsetHeight); }, [selConns.length,selectedDep]);
 
   // ── D3 Sankey ─────────────────────────────────────────────────────────────
