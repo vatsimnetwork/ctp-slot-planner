@@ -18,4 +18,4 @@ COPY backend/ ./
 COPY --from=frontend-build /app/dist ./frontend_dist
 
 EXPOSE 5000
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "180", "app:app"]

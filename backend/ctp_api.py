@@ -11,7 +11,7 @@ def _headers():
 
 
 def _get(path: str, **kwargs):
-    r = requests.get(f"{_BASE}{path}", headers=_headers(), timeout=15, **kwargs)
+    r = requests.get(f"{_BASE}{path}", headers=_headers(), timeout=60, **kwargs)
     r.raise_for_status()
     return r.json()
 
@@ -21,7 +21,7 @@ def _post(path: str, body):
         f"{_BASE}{path}",
         headers={**_headers(), "Content-Type": "application/json"},
         json=body,
-        timeout=60,
+        timeout=120,
     )
     r.raise_for_status()
     return r.json()
@@ -32,7 +32,7 @@ def _put(path: str, body):
         f"{_BASE}{path}",
         headers={**_headers(), "Content-Type": "application/json"},
         json=body,
-        timeout=30,
+        timeout=60,
     )
     r.raise_for_status()
     return r.json()
@@ -43,7 +43,7 @@ def _patch(path: str, body):
         f"{_BASE}{path}",
         headers={**_headers(), "Content-Type": "application/json"},
         json=body,
-        timeout=30,
+        timeout=60,
     )
     r.raise_for_status()
     return r.json()
