@@ -669,7 +669,9 @@ def _derive_slot_groups_from_slots(slots: list, route_segments: list, airports: 
 
 @app.get("/login/")
 def login():
-    return_to = request.args.get("return_to", SELF_PUBLIC_PATH + "/")
+    return_to = request.args.get("return_to", AUTH_PUBLIC_URL + SELF_PUBLIC_PATH + "/")
+    if return_to.startswith("/"):
+        return_to = AUTH_PUBLIC_URL + return_to
     return redirect(f"{AUTH_PUBLIC_URL}/auth/redirect?return_to={return_to}")
 
 

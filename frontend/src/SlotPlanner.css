@@ -278,3 +278,85 @@
 .tl-usage-bar::after { content:''; display:block; height:100%; width:var(--pct); background:var(--bar-color); border-radius:3px; transition:width .3s; }
 .tl-usage-val { font-size:11px; color:var(--text-muted); white-space:nowrap; }
 .tl-usage-val--over { color:var(--danger,#ef4444); font-weight:700; }
+
+/* ── City Pair Totals page ── */
+.cpt { padding:24px 28px; }
+.cpt__scroll-wrap { overflow-x:auto; }
+
+.cpt__table { border-collapse:collapse; font-size:13px; white-space:nowrap; }
+
+.cpt__corner {
+  min-width:90px; position:relative; padding:6px 8px;
+  border-bottom:2px solid var(--border); border-right:2px solid var(--border);
+  vertical-align:bottom;
+}
+.cpt__corner-dep {
+  display:block; font-size:10px; font-weight:600; color:var(--text-muted);
+  text-align:left; letter-spacing:.04em;
+}
+.cpt__corner-arr {
+  display:block; font-size:10px; font-weight:600; color:var(--text-muted);
+  text-align:right; letter-spacing:.04em;
+}
+.cpt__arr-head {
+  font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--text-muted); padding:6px 10px; text-align:center;
+  border-bottom:2px solid var(--border); border-right:1px solid var(--border-subtle);
+  min-width:64px;
+}
+.cpt__dep-label {
+  font-size:13px; font-weight:700; color:var(--text); padding:7px 12px;
+  border-bottom:1px solid var(--border-subtle); border-right:2px solid var(--border);
+  position:sticky; left:0; background:var(--bg); z-index:1;
+}
+
+/* Data cells */
+.cpt__cell {
+  text-align:center; padding:7px 10px;
+  border-bottom:1px solid var(--border-subtle); border-right:1px solid var(--border-subtle);
+  font-variant-numeric:tabular-nums;
+}
+.cpt__cell--impossible { background:rgba(239,68,68,.12); }
+.cpt__cell--zero { color:var(--text-faint); }
+.cpt__cell--value { font-weight:600; color:var(--text); }
+
+/* Summary columns (Assigned / Capacity / Remaining) on right */
+.cpt__summary-head {
+  font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--text-muted); padding:6px 12px; text-align:center;
+  border-bottom:2px solid var(--border); border-left:2px solid var(--border);
+  background:var(--bg-secondary);
+}
+.cpt__summary-head--first { border-left:3px solid var(--accent); }
+.cpt__summary-cell {
+  text-align:center; padding:7px 12px; font-variant-numeric:tabular-nums;
+  border-bottom:1px solid var(--border-subtle); border-left:2px solid var(--border);
+  background:var(--bg-secondary); color:var(--text-secondary);
+}
+.cpt__summary-cell--first { font-weight:700; color:var(--text); border-left:3px solid var(--accent); }
+.cpt__summary-cell--over { color:var(--qty-over-color); font-weight:700; }
+
+/* Footer rows (Assigned / Capacity / Remaining) at bottom */
+.cpt__footer-row td { border-top:2px solid var(--border); border-bottom:1px solid var(--border-subtle); }
+.cpt__footer-row--assigned td { border-top:3px solid var(--accent); }
+.cpt__footer-label {
+  font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--text-muted); padding:7px 12px;
+  background:var(--bg-secondary); border-right:2px solid var(--border);
+  position:sticky; left:0; z-index:1;
+}
+.cpt__footer-cell {
+  text-align:center; padding:7px 10px; font-variant-numeric:tabular-nums;
+  background:var(--bg-secondary); color:var(--text-secondary);
+  border-right:1px solid var(--border-subtle);
+}
+.cpt__footer-row--assigned .cpt__footer-cell { font-weight:700; color:var(--text); }
+.cpt__footer-cell--over { color:var(--qty-over-color); font-weight:700; }
+
+/* Grand total cell */
+.cpt__grand-total {
+  text-align:center; padding:7px 14px; font-size:15px; font-weight:800;
+  color:var(--accent); background:var(--accent-subtle);
+  border-left:3px solid var(--accent); border-bottom:1px solid var(--border-subtle);
+  font-variant-numeric:tabular-nums; vertical-align:middle;
+}
