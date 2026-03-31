@@ -161,9 +161,6 @@ export default function SlotPlanner() {
       tracks.forEach(t    => { if (t.cap != null && t.slots  > t.cap) violations.push({ kind: 'Track',        name: t.id, used: t.slots,  limit: t.cap }); });
       const prev = limitViolations;
       setLimitViolations(violations);
-      if (violations.length > 0 && violations.some(v => !prev.find(p => p.kind === v.kind && p.name === v.name))) {
-        setShowLimitModal(true);
-      }
     }, 600);
     return () => { if (warnTimer.current) clearTimeout(warnTimer.current); };
   }, [data]);
@@ -533,7 +530,7 @@ export default function SlotPlanner() {
                     {ddDepRoutes(selectedDep).map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                   <select disabled={!isStaff} value={c.track} onChange={e=>editConn(c,'track',e.target.value)}>{ddTracks(c.depRoute).map(t=><option key={t} value={t}>{t}</option>)}</select>
-                  <select disabled={!isStaff} value={c.arrRoute} onChange={e=>{const ar=e.target.value;editConn(c,'arrRoute',ar);const a=autoArr(ar);if(a)setData(prev=>{const newConns=prev.connections.map(x=>x===c?{...x,arrRoute:ar,arr:a}:x);return recomputeAggregates(prev,newConns);});}}>{ddArrRoutes(c.track).map(r=><option key={r} value={r}>{r}</option>)}</select>
+                  <select disabled={!isStaff} value={c.arrRoute} onChange={e=>{const ar=e.target.value;const a=autoArr(ar);hasEdits.current=true;setData(prev=>{const newConns=prev.connections.map(x=>x===c?{...x,arrRoute:ar,...(a?{arr:a}:{})}:x);return recomputeAggregates(prev,newConns);});}}>{ddArrRoutes(c.track).map(r=><option key={r} value={r}>{r}</option>)}</select>
                   <select disabled={!isStaff || !!autoArr(c.arrRoute)} value={c.arr} onChange={e=>editConn(c,'arr',e.target.value)}>
                     <option value={c.arr}>{c.arr}</option>
                     {!autoArr(c.arrRoute) && [...new Set([...setupData.arrs,...arrs.map(a=>a.id)])].sort().filter(a=>a!==c.arr).map(a=><option key={a} value={a}>{a}</option>)}
