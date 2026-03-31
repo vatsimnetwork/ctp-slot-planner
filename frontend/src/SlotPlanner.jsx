@@ -131,8 +131,10 @@ export default function SlotPlanner() {
       const tagUsage = {};
       const sectorUsage = {};
       connections.forEach(c => {
-        (tagMap[c.track] || []).forEach(tag => { tagUsage[tag] = (tagUsage[tag] || 0) + c.value; });
-        (sectorMap[c.track] || []).forEach(s => { sectorUsage[s.identifier] = (sectorUsage[s.identifier] || 0) + c.value; });
+        [c.depRoute, c.track, c.arrRoute].forEach(seg => {
+          (tagMap[seg] || []).forEach(tag => { tagUsage[tag] = (tagUsage[tag] || 0) + c.value; });
+          (sectorMap[seg] || []).forEach(s => { sectorUsage[s.identifier] = (sectorUsage[s.identifier] || 0) + c.value; });
+        });
       });
       const violations = [];
       tagLimits.forEach(tl => {
@@ -368,8 +370,10 @@ export default function SlotPlanner() {
   const liveTagUsage = {};
   const liveSectorUsage = {};
   connections.forEach(c => {
-    (setupData.tagMap[c.track] || []).forEach(tag => { liveTagUsage[tag] = (liveTagUsage[tag] || 0) + c.value; });
-    (setupData.sectorMap[c.track] || []).forEach(s => { liveSectorUsage[s.identifier] = (liveSectorUsage[s.identifier] || 0) + c.value; });
+    [c.depRoute, c.track, c.arrRoute].forEach(seg => {
+      (setupData.tagMap[seg] || []).forEach(tag => { liveTagUsage[tag] = (liveTagUsage[tag] || 0) + c.value; });
+      (setupData.sectorMap[seg] || []).forEach(s => { liveSectorUsage[s.identifier] = (liveSectorUsage[s.identifier] || 0) + c.value; });
+    });
   });
   const revStr = simVersion!==null?`${simVersion}.${plannerRevisions}`:'—';
 
