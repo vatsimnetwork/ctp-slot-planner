@@ -13,7 +13,6 @@ const BRACE_COL_W = BRACE_W + 16;
 
 // ─── Default simulator parameters ────────────────────────────────────────────
 const DEFAULT_SIM_PARAMS = {
-  RecalculateMaximumAirportSlots:                    true,
   IntendedSlotGenerationMode:                        'MaximizeSlots',
   DepartureTimeWindowOffsetSynchronizationLongitude: -30,
   SimulationAnalysisResolutionInMinutes:             2,
@@ -146,7 +145,6 @@ function SimParamsModal({ mode, params, onParamsChange, onConfirm, onClose }) {
               <select className="modal-select" value={params.IntendedSlotGenerationMode} onChange={e=>set('IntendedSlotGenerationMode',e.target.value)}>
                 <option value="MaximizeSlots">Maximize Slots</option><option value="VoteProportional">Vote Proportional</option><option value="Random">Random</option>
               </select></label>
-            <label className="modal-row modal-row--check"><input type="checkbox" checked={params.RecalculateMaximumAirportSlots} onChange={e=>set('RecalculateMaximumAirportSlots',e.target.checked)}/><span className="modal-label">Recalculate Maximum Airport Slots</span></label>
           </>}
           {mode === 'simulate' && <>
             <div className="modal-section-title">Simulation</div>

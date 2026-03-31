@@ -273,7 +273,6 @@ def submit_slotgroups():
         return raw
 
     field_map = {
-        "RecalculateMaximumAirportSlots":                        "recalculateMaximumAirportSlots",
         "IntendedSlotGenerationMode":                            "intendedSlotGenerationMode",
         "DepartureTimeWindowOffsetSynchronizationLongitude":     "departureTimeWindowOffsetSynchronizationLongitude",
         "SimulationAnalysisResolutionInMinutes":                 "simulationAnalysisResolutionInMinutes",
