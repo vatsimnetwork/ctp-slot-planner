@@ -13,7 +13,7 @@ function UsageBar({ used, limit }) {
   );
 }
 
-export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {}, sectorUsage = {}, departureHours = 3, tagToRoutes = {}, sectorToRoutes = {} }) {
+export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {}, sectorUsage = {}, departureHours = 3, tagToRoutes = {}, sectorToRoutes = {}, routeSlots = {} }) {
   const [tagLimits, setTagLimits] = useState([]);
   const [sectors,   setSectors]   = useState([]);
   const [saving,    setSaving]    = useState(false);
@@ -151,7 +151,8 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
                           <tr key={i} className="tl-subrow">
                             <td></td>
                             <td className="tl-subrow__name" colSpan={2}>{r.identifier}</td>
-                            <td className="tl-subrow__group" colSpan={3}>{r.routeSegmentGroup || '—'}</td>
+                            <td className="tl-subrow__group">{r.routeSegmentGroup || '—'}</td>
+                            <td colSpan={2} className="tl-subrow__slots">{routeSlots[r.identifier] ?? 0} slots</td>
                           </tr>
                         ))}
                       </React.Fragment>
@@ -216,7 +217,8 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
                           <tr key={i} className="tl-subrow">
                             <td></td>
                             <td className="tl-subrow__name" colSpan={2}>{r.identifier}</td>
-                            <td className="tl-subrow__group" colSpan={3}>{r.routeSegmentGroup || '—'}</td>
+                            <td className="tl-subrow__group">{r.routeSegmentGroup || '—'}</td>
+                            <td colSpan={2} className="tl-subrow__slots">{routeSlots[r.identifier] ?? 0} slots</td>
                           </tr>
                         ))}
                       </React.Fragment>

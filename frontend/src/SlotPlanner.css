@@ -274,6 +274,7 @@
 .tl-subrow td { background:var(--bg-subtle); font-size:12px; color:var(--text-secondary); }
 .tl-subrow__name { font-weight:500; color:var(--text); padding-left:24px !important; }
 .tl-subrow__group { color:var(--text-muted); }
+.tl-subrow__slots { text-align:right; color:var(--text-secondary); padding-right:8px !important; }
 .tl-usage-bar__wrap { display:flex; flex-direction:column; gap:3px; min-width:120px; }
 .tl-usage-bar { height:6px; background:var(--bg-subtle); border-radius:3px; overflow:hidden; }
 .tl-usage-bar::after { content:''; display:block; height:100%; width:var(--pct); background:var(--bar-color); border-radius:3px; transition:width .3s; }

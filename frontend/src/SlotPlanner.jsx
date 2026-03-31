@@ -367,6 +367,12 @@ export default function SlotPlanner() {
   }, [data, colPositions, selectedDep, searchTerm]);
 
   const liveSlots = {}; connections.forEach(c=>{liveSlots[c.track]=(liveSlots[c.track]||0)+c.value;});
+  const liveRouteSlots = {};
+  connections.forEach(c => {
+    liveRouteSlots[c.depRoute] = (liveRouteSlots[c.depRoute] || 0) + c.value;
+    liveRouteSlots[c.track]    = (liveRouteSlots[c.track]    || 0) + c.value;
+    liveRouteSlots[c.arrRoute] = (liveRouteSlots[c.arrRoute] || 0) + c.value;
+  });
   const liveTagUsage = {};
   const liveSectorUsage = {};
   connections.forEach(c => {
@@ -491,7 +497,7 @@ export default function SlotPlanner() {
         </div>
       </div>
 
-      {activeTab === 'throughputLimits' && <ThroughputLimitsPage isStaff={isStaff} addToast={addToast} tagUsage={liveTagUsage} sectorUsage={liveSectorUsage} departureHours={setupData.departureHours} tagToRoutes={setupData.tagToRoutes} sectorToRoutes={setupData.sectorToRoutes}/>}
+      {activeTab === 'throughputLimits' && <ThroughputLimitsPage isStaff={isStaff} addToast={addToast} tagUsage={liveTagUsage} sectorUsage={liveSectorUsage} departureHours={setupData.departureHours} tagToRoutes={setupData.tagToRoutes} sectorToRoutes={setupData.sectorToRoutes} routeSlots={liveRouteSlots}/>}
 
       {activeTab === 'cityPairTotals' && <CityPairTotalsPage data={data} setupData={setupData}/>}
 
