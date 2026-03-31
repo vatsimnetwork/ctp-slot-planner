@@ -100,7 +100,7 @@ def setup():
     try:
         latest = ctp_api.get_latest_slot_revision()
         if latest:
-            sg = _parse_commentary(latest.get("slotGenerationOutputCommentary", ""))
+            sg = _parse_commentary(latest.get("slotPlannerDraftCommentary", ""))
             if sg and sg.get("slotGroups"):
                 saved_tracks = {
                     _split_slot_id(item["id"])[2]
@@ -191,7 +191,7 @@ def get_slotgroups():
     slot_groups, caps = [], {}
 
     if latest:
-        draft = _parse_commentary(latest.get("slotGenerationOutputCommentary", ""))
+        draft = _parse_commentary(latest.get("slotPlannerDraftCommentary", ""))
         if draft:
             slot_groups = draft.get("slotGroups", [])
             caps        = draft.get("caps", {})
@@ -221,23 +221,23 @@ def save_slotgroups():
     try:
         latest = ctp_api.get_latest_slot_revision()
         if latest:
-            existing = _parse_commentary(latest.get("slotGenerationOutputCommentary", ""))
-            if existing and existing.get("draft"):
+            is_draft = bool(latest.get("slotPlannerDraftCommentary"))
+            if is_draft:
                 # Safe to overwrite — this is a draft revision
                 ctp_api.update_slot_revision(latest["id"], {
-                    "slotGenerationOutputCommentary": commentary,
+                    "slotPlannerDraftCommentary": commentary,
                 })
             else:
                 # Latest revision is a sim/calc revision — don't overwrite it,
                 # create a new draft instead so we don't corrupt simulator output
                 ctp_api.create_slot_revision(metadata={
-                    "eventId":                        ctp_api.event_id(),
-                    "slotGenerationOutputCommentary": commentary,
+                    "eventId":                  ctp_api.event_id(),
+                    "slotPlannerDraftCommentary": commentary,
                 })
         else:
             ctp_api.create_slot_revision(metadata={
-                "eventId":                        ctp_api.event_id(),
-                "slotGenerationOutputCommentary": commentary,
+                "eventId":                  ctp_api.event_id(),
+                "slotPlannerDraftCommentary": commentary,
             })
     except requests.HTTPError as e:
         return _ext_error(e)
@@ -336,7 +336,7 @@ def _submit_simulate(body: dict):
 
     # Fetch draft slot groups from latest revision
     latest = ctp_api.get_latest_slot_revision()
-    draft = _parse_commentary(latest.get("slotGenerationOutputCommentary", "")) if latest else None
+    draft = _parse_commentary(latest.get("slotPlannerDraftCommentary", "")) if latest else None
     slot_groups = (draft.get("slotGroups", []) if draft else None) or body.get("slotGroups", [])
     if draft:
         caps = draft.get("caps", caps)
@@ -382,9 +382,9 @@ def _submit_simulate(body: dict):
             "draft":      True,
         })
         draft_revision = ctp_api.create_slot_revision(metadata={
-            "eventId":                        ctp_api.event_id(),
-            "slotGenerationOutputCommentary": draft_commentary,
-        })
+                "eventId":                   ctp_api.event_id(),
+                "slotPlannerDraftCommentary": draft_commentary,
+            })
         planner_revisions = draft_revision.get("number", body.get("plannerRevisions", 0))
 
     return slot_groups, caps, planner_revisions, sim_warning, commentary
@@ -418,8 +418,8 @@ def _submit_calculate(body: dict):
         "draft":      True,
     })
     draft_revision = ctp_api.create_slot_revision(metadata={
-        "eventId":                        ctp_api.event_id(),
-        "slotGenerationOutputCommentary": draft_commentary,
+        "eventId":                   ctp_api.event_id(),
+        "slotPlannerDraftCommentary": draft_commentary,
     })
 
     planner_revisions = draft_revision.get("number", body.get("plannerRevisions", 0))
