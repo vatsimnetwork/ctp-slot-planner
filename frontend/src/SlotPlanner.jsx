@@ -36,12 +36,12 @@ export default function SlotPlanner() {
   const [isStaff,     setIsStaff]     = useState(false);
   const [limitViolations, setLimitViolations] = useState([]);
   const [showLimitModal,  setShowLimitModal]  = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
   const svgRef  = useRef(null);
   const gridRef = useRef(null);
   const editRef = useRef(null);
   const [colPositions, setColPositions] = useState(null);
   const [braceHeight,  setBraceHeight]  = useState(0);
-  const saveTimer = useRef(null);
   const isSubmitting = useRef(false);
   const eventIdRef = useRef(null);
   const simPollRef = useRef(null);
@@ -101,7 +101,7 @@ export default function SlotPlanner() {
 
   const { deps, depRoutes, tracks, arrRoutes, arrs, connections } = data;
 
-  // ── Auto-save (debounced 800 ms) ─────────────────────────────────────────
+  // ── Save ──────────────────────────────────────────────────────────────────
   const latestData      = useRef(data);
   latestData.current = data;
 
@@ -113,19 +113,14 @@ export default function SlotPlanner() {
     ...extras,
   }), []);
 
-  useEffect(() => {
-    if (loading || !isStaff || isSubmitting.current) return;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      if (isSubmitting.current) return;
-      setSaving(true);
-      API.save(buildPayload())
-        .then(r => r.ok ? null : Promise.reject(`Auto-save failed (${r.status})`))
-        .catch(err => addToast(String(err), 'error'))
-        .finally(() => setSaving(false));
-    }, 800);
-    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [data, loading]);
+  const handleSave = () => {
+    setSaving(true);
+    API.save(buildPayload())
+      .then(r => r.ok ? null : Promise.reject(`Save failed (${r.status})`))
+      .then(() => setIsDirty(false))
+      .catch(err => addToast(String(err), 'error'))
+      .finally(() => setSaving(false));
+  };
 
   // ── Tag / sector limit warnings ───────────────────────────────────────────
   const warnTimer = useRef(null);
@@ -229,6 +224,7 @@ export default function SlotPlanner() {
 
   const removeConnection = (conn) => {
     hasEdits.current = true;
+    setIsDirty(true);
     setData(prev => {
       const newConns = prev.connections.filter(c => !(
         c.dep===conn.dep && c.depRoute===conn.depRoute &&
@@ -240,6 +236,7 @@ export default function SlotPlanner() {
 
   const editConn = (conn, field, val) => {
     hasEdits.current = true;
+    setIsDirty(true);
     setData(prev => {
       const newConns = prev.connections.map(c => c === conn ? { ...c, [field]: val } : c);
       return recomputeAggregates(prev, newConns);
@@ -271,6 +268,8 @@ export default function SlotPlanner() {
     const { dep, depRoute, track, arrRoute, arr, value } = newRoute;
     if (!dep||!depRoute||!track||!arrRoute||!arr) { addToast('Fill in all five fields','warning'); return; }
     if (data.connections.some(c=>c.dep===dep&&c.depRoute===depRoute&&c.track===track&&c.arrRoute===arrRoute&&c.arr===arr)) { addToast('Connection already exists','warning'); return; }
+    hasEdits.current = true;
+    setIsDirty(true);
     const dc = setupData.defaultCaps || {};
     setData(prev => {
       const newConns = [...prev.connections,{dep,depRoute,track,arrRoute,arr,value}];
@@ -315,7 +314,6 @@ export default function SlotPlanner() {
     setShowModal(false);
     const mode = pendingMode;
     const nextRev = hasEdits.current ? plannerRevisions + 1 : plannerRevisions;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
     isSubmitting.current = true;
     setSaving(false);
     if (mode === 'simulate') { setSimStatus('running'); startSimPoll(); }
@@ -324,6 +322,7 @@ export default function SlotPlanner() {
       .then(res=>{
         setPlannerRevisions(nextRev);
         hasEdits.current = false;
+        setIsDirty(false);
         if (res?.slotGroups) setData(parseSlotGroups(res.slotGroups,res.caps??{}));
         if (res?.warning) addToast(res.warning,'warning');
         if (res?.commentary) addToast(res.commentary,'info');
@@ -460,7 +459,6 @@ export default function SlotPlanner() {
             <TimeSpinner value={syncTime} onChange={handleSyncTimeChange} style={!isStaff?{pointerEvents:'none',opacity:.5}:{}}/>
           </div>
           <span className="planner__meta-label">Rev <strong className="planner__rev-value">{revStr}</strong></span>
-          {saving && <span className="planner__saving-indicator">Saving…</span>}
           {simStatus === 'running'       && <span className="planner__sim-status planner__sim-status--running">Running simulator…</span>}
           {simStatus === 'sim_responded' && <span className="planner__sim-status planner__sim-status--saving">Saving slot times…</span>}
           {simStatus === 'saved'         && <span className="planner__sim-status planner__sim-status--done">Finalizing…</span>}
@@ -468,6 +466,15 @@ export default function SlotPlanner() {
           {limitViolations.length > 0 && (
             <button className="planner__limit-alert" onClick={()=>setShowLimitModal(true)}>
               ⚠ {limitViolations.length} limit{limitViolations.length > 1 ? 's' : ''} exceeded
+            </button>
+          )}
+          {isStaff && (
+            <button
+              className={`planner__btn${isDirty ? ' planner__btn--dirty' : ''}`}
+              disabled={!isDirty || saving}
+              onClick={handleSave}
+            >
+              {saving ? 'Saving…' : isDirty ? 'Save Draft ●' : 'Saved'}
             </button>
           )}
           <button disabled={!isStaff} className="planner__btn" onClick={()=>{setPendingMode('calculate');setShowConfirm(true);}}>Calculate Slots</button>
@@ -530,7 +537,7 @@ export default function SlotPlanner() {
                     {ddDepRoutes(selectedDep).map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                   <select disabled={!isStaff} value={c.track} onChange={e=>editConn(c,'track',e.target.value)}>{ddTracks(c.depRoute).map(t=><option key={t} value={t}>{t}</option>)}</select>
-                  <select disabled={!isStaff} value={c.arrRoute} onChange={e=>{const ar=e.target.value;const a=autoArr(ar);hasEdits.current=true;setData(prev=>{const newConns=prev.connections.map(x=>x===c?{...x,arrRoute:ar,...(a?{arr:a}:{})}:x);return recomputeAggregates(prev,newConns);});}}>{ddArrRoutes(c.track).map(r=><option key={r} value={r}>{r}</option>)}</select>
+                  <select disabled={!isStaff} value={c.arrRoute} onChange={e=>{const ar=e.target.value;const a=autoArr(ar);hasEdits.current=true;setIsDirty(true);setData(prev=>{const newConns=prev.connections.map(x=>x===c?{...x,arrRoute:ar,...(a?{arr:a}:{})}:x);return recomputeAggregates(prev,newConns);});}}>{ddArrRoutes(c.track).map(r=><option key={r} value={r}>{r}</option>)}</select>
                   <select disabled={!isStaff || !!autoArr(c.arrRoute)} value={c.arr} onChange={e=>editConn(c,'arr',e.target.value)}>
                     <option value={c.arr}>{c.arr}</option>
                     {!autoArr(c.arrRoute) && [...new Set([...setupData.arrs,...arrs.map(a=>a.id)])].sort().filter(a=>a!==c.arr).map(a=><option key={a} value={a}>{a}</option>)}

@@ -39,6 +39,8 @@
 .planner__btn:disabled { opacity:.4; cursor:not-allowed; }
 .planner__btn--sim { background:var(--green); }
 .planner__btn--sim:hover:not(:disabled) { background:var(--green-hover); }
+.planner__btn--dirty { background:var(--accent); }
+.planner__btn--dirty:hover:not(:disabled) { filter:brightness(1.1); }
 .planner__btn--destructive { background:#c0392b; }
 .planner__btn--destructive:hover:not(:disabled) { background:#a93226; }
 .planner__btn--logout { background:var(--bg-hover); color:var(--text); border:1px solid var(--border); font-size:13px; padding:6px 12px; }
@@ -60,7 +62,6 @@
 .planner__start-time { display:flex; align-items:center; gap:8px; }
 .planner__meta-label { font-size:13px; color:var(--header-text-dim); font-weight:500; }
 .planner__rev-value { color:var(--header-text); font-weight:500; }
-.planner__saving-indicator { font-size:12px; color:var(--header-text-dim); font-style:italic; }
 .planner__sim-status { font-size:12px; font-style:italic; font-weight:600; display:inline-flex; align-items:center; gap:5px; }
 .planner__sim-status::before { content:''; display:inline-block; width:7px; height:7px; border-radius:50%; animation:sim-pulse 1.2s ease-in-out infinite; }
 .planner__sim-status--running::before  { background:#f59e0b; }
