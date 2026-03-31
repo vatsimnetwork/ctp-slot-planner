@@ -355,8 +355,13 @@
 
 /* Grand total cell */
 .cpt__grand-total {
-  text-align:center; padding:7px 14px; font-size:15px; font-weight:800;
+  text-align:center; padding:10px 14px; font-variant-numeric:tabular-nums;
   color:var(--accent); background:var(--accent-subtle);
   border-left:3px solid var(--accent); border-bottom:1px solid var(--border-subtle);
-  font-variant-numeric:tabular-nums; vertical-align:middle;
+  vertical-align:middle;
 }
+.cpt__grand-total-label {
+  display:block; font-size:10px; font-weight:700; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--accent); opacity:.7; margin-bottom:4px;
+}
+.cpt__grand-total-value { display:block; font-size:22px; font-weight:800; line-height:1; }

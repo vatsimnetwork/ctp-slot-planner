@@ -2,573 +2,15 @@ import React, { useEffect, useRef, useState, useLayoutEffect, useCallback, useMe
 import * as d3 from "d3";
 import "./SlotPlanner.css";
 
-// ─── Layout constants ─────────────────────────────────────────────────────────
-const ROW_H       = 52;
-const HEADER_H    = 47 + 20;
-const TRACK_COLS  = ['#2783C5', '#29B473', '#2A3B90', '#E8543E', '#9B59B6', '#F39C12'];
-const BRACE_W     = 18;
-const TIME_W      = 0;
-const BRACE_GAP   = 0;
-const BRACE_COL_W = BRACE_W + 16;
-
-// ─── Default simulator parameters ────────────────────────────────────────────
-const DEFAULT_SIM_PARAMS = {
-  IntendedSlotGenerationMode:                        'MaximizeSlots',
-  DepartureTimeWindowOffsetSynchronizationLongitude: -30,
-  SimulationAnalysisResolutionInMinutes:             2,
-  ShouldSimulationUseActualWeatherForecastData:      false,
-  IntendedDepartureTimeWindowOffsetsCalculationMode: 'EarliestRoutes',
-  DepartureTimeWindowOffsetSynchronizationTimeOfDay: '1600z',
-  CalculateThroughputDataOnlyForManuallyProvidedSectors: true,
-  IntendedWaypointThroughputCalculationMode:         'FirstWaypointsOfNATRouteSegmentsOnly',
-  ThresholdToCheckIfAirplaneIsCountedAtWaypointInNm: 5,
-  CalculationFallbackGroundSpeed:                    300,
-  HighSimulationAccuracy:                            false,
-};
-
-// ─── API helpers ──────────────────────────────────────────────────────────────
-const BASE = import.meta.env.BASE_URL;
-async function apiFetch(url, options = {}) {
-  const res = await fetch(BASE + url.replace(/^\//, ''), { ...options, credentials: 'include' });
-  if (res.status === 401) { window.location.href = BASE + 'login/?return_to=' + encodeURIComponent(window.location.pathname + window.location.search); throw new Error('Unauthorized'); }
-  return res;
-}
-const API = {
-  loadSetup:            () => apiFetch('/setup/'),
-  loadSlots:            () => apiFetch('/slotgroups/'),
-  save:                 (p) => apiFetch('/slotgroups/save/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
-  submit:               (p) => apiFetch('/slotgroups/submit/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
-  syncTime:             (v) => apiFetch('/synctime/', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: v }) }),
-  loadThroughputLimits: () => apiFetch('/throughput-limits/'),
-  saveThroughputLimits: (p) => apiFetch('/throughput-limits/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
-};
-
-// ─── ID parser ────────────────────────────────────────────────────────────────
-function splitSlotId(id) {
-  const parts = id.split('|');
-  if (parts.length !== 5) { console.warn('[SlotPlanner] Bad ID:', id); return null; }
-  return parts;
-}
-
-// ─── Parse slot groups into display data ─────────────────────────────────────
-function parseSlotGroups(slotGroups, caps = {}) {
-  const deps = {}, depRoutes = {}, tracks = {}, arrRoutes = {}, arrs = {};
-  const connections = [];
-  let tcIdx = 0;
-  const C = { deps: caps.deps||{}, depRoutes: caps.depRoutes||{}, tracks: caps.tracks||{}, arrRoutes: caps.arrRoutes||{}, arrs: caps.arrs||{} };
-
-  (slotGroups || []).forEach(({ id, value }) => {
-    const p = splitSlotId(id); if (!p) return;
-    const [dep, depRoute, track, arrRoute, arr] = p;
-    if (!deps[dep])           deps[dep]           = { id: dep,      value: 0, cap: C.deps[dep]           ?? null };
-    if (!depRoutes[depRoute]) depRoutes[depRoute]  = { id: depRoute, value: 0, cap: C.depRoutes[depRoute] ?? null, selected: true };
-    if (!tracks[track])       tracks[track]        = { id: track,    col: TRACK_COLS[tcIdx++ % TRACK_COLS.length], slots: 0, cap: C.tracks[track] ?? null };
-    if (!arrRoutes[arrRoute]) arrRoutes[arrRoute]  = { id: arrRoute, value: 0, cap: C.arrRoutes[arrRoute] ?? null, selected: true };
-    if (!arrs[arr])           arrs[arr]            = { id: arr,      value: 0, cap: C.arrs[arr]           ?? null };
-    deps[dep].value += value; depRoutes[depRoute].value += value; tracks[track].slots += value;
-    arrRoutes[arrRoute].value += value; arrs[arr].value += value;
-    connections.push({ dep, depRoute, track, arrRoute, arr, value });
-  });
-  return { deps: Object.values(deps), depRoutes: Object.values(depRoutes), tracks: Object.values(tracks), arrRoutes: Object.values(arrRoutes), arrs: Object.values(arrs), connections };
-}
-
-function snapshotCaps(data) {
-  return {
-    deps:      Object.fromEntries(data.deps.map(d      => [d.id, d.cap])),
-    depRoutes: Object.fromEntries(data.depRoutes.map(r => [r.id, r.cap])),
-    tracks:    Object.fromEntries(data.tracks.map(t    => [t.id, t.cap])),
-    arrRoutes: Object.fromEntries(data.arrRoutes.map(r => [r.id, r.cap])),
-    arrs:      Object.fromEntries(data.arrs.map(a      => [a.id, a.cap])),
-  };
-}
-
-// ─── Time helpers ─────────────────────────────────────────────────────────────
-function parseTime(v) {
-  const s = (v||'').trim().toLowerCase().replace('z','');
-  return { h: Math.min(23,Math.max(0,parseInt(s.slice(0,2),10)||0)), m: Math.min(59,Math.max(0,parseInt(s.slice(2,4),10)||0)) };
-}
-function formatTime({ h, m }) { return `${String(h).padStart(2,'0')}${String(m).padStart(2,'00')}z`; }
-
-function barycentricOrder(items, conns, key, prevKey, prevOrder) {
-  return items.map(item => {
-    const linked = conns.filter(c => c[key] === item.id);
-    const bary   = linked.length ? d3.mean(linked.map(c => prevOrder.get(c[prevKey]))) : Infinity;
-    return { item, bary };
-  }).sort((a,b) => a.bary - b.bary).map(d => d.item);
-}
-
-// ─── QuantityLabel ────────────────────────────────────────────────────────────
-function QuantityLabel({ used, cap, size = 'md' }) {
-  return (
-    <span className={`qty-label qty-label--${size}${cap != null && used > cap ? ' qty-label--over' : ''}`}>
-      {used}{cap != null ? <span className="qty-sep">/{cap}</span> : null}
-    </span>
-  );
-}
-
-// ─── TimeSpinner ──────────────────────────────────────────────────────────────
-function TimeSpinner({ value, onChange, style, className }) {
-  const { h, m } = parseTime(value);
-  const setH = (d) => onChange(formatTime({ h: ((h+d)%24+24)%24, m }));
-  const setM = (d) => { let nm=m+d,nh=h; if(nm>=60){nm-=60;nh=(nh+1)%24} if(nm<0){nm+=60;nh=((nh-1)%24+24)%24} onChange(formatTime({h:nh,m:nm})); };
-  const Arr = ({onClick,dir}) => <button className="planner__time-arrow" type="button" tabIndex={-1} onClick={e=>{e.stopPropagation();onClick();}}>{dir==='up'?'▲':'▼'}</button>;
-  return (
-    <div className={`planner__time-spinner${className?' '+className:''}`} style={style} onClick={e=>e.stopPropagation()}>
-      <div className="planner__time-col"><Arr onClick={()=>setH(1)} dir="up"/><span className="planner__time-seg">{String(h).padStart(2,'0')}</span><Arr onClick={()=>setH(-1)} dir="down"/></div>
-      <span className="planner__time-sep">:</span>
-      <div className="planner__time-col"><Arr onClick={()=>setM(1)} dir="up"/><span className="planner__time-seg">{String(m).padStart(2,'0')}</span><Arr onClick={()=>setM(-1)} dir="down"/></div>
-      <span className="planner__time-z">z</span>
-    </div>
-  );
-}
-
-// ─── CurlyBrace ───────────────────────────────────────────────────────────────
-function CurlyBrace({ height }) {
-  if (height < 6) return <div style={{ width: BRACE_W }} />;
-  const W=BRACE_W, mid=height/2, c=Math.min(height*0.11,13), sp=W*0.48;
-  const d=[`M ${W} 0`,`C ${sp} 0,${sp} ${c},${sp} ${c}`,`L ${sp} ${mid-c}`,`C ${sp} ${mid-c*0.35},0 ${mid-c*0.15},0 ${mid}`,`C 0 ${mid+c*0.15},${sp} ${mid+c*0.35},${sp} ${mid+c}`,`L ${sp} ${height-c}`,`C ${sp} ${height-c},${sp} ${height},${W} ${height}`].join(' ');
-  return <svg width={W} height={height} style={{display:'block',flexShrink:0}}><path d={d} fill="none" stroke="var(--border)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
-}
-
-// ─── SimParamsModal ───────────────────────────────────────────────────────────
-function SimParamsModal({ mode, params, onParamsChange, onConfirm, onClose }) {
-  const set = (k,v) => onParamsChange({...params,[k]:v});
-  const label = mode === 'calculate' ? 'Calculate Slots' : 'Simulate Slots';
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" onClick={e=>e.stopPropagation()}>
-        <div className="modal-header"><span className="modal-title">{label} — Parameters</span><button className="modal-close" onClick={onClose}>✕</button></div>
-        <div className="modal-body">
-          {mode === 'calculate' && <>
-            <div className="modal-section-title">Slot Generation</div>
-            <label className="modal-row"><span className="modal-label">Slot Generation Mode</span>
-              <select className="modal-select" value={params.IntendedSlotGenerationMode} onChange={e=>set('IntendedSlotGenerationMode',e.target.value)}>
-                <option value="MaximizeSlots">Maximize Slots</option><option value="VoteProportional">Vote Proportional</option><option value="Random">Random</option>
-              </select></label>
-          </>}
-          {mode === 'simulate' && <>
-            <div className="modal-section-title">Simulation</div>
-            <label className="modal-row"><span className="modal-label">Analysis Resolution (minutes)</span><input className="modal-input" type="number" min={1} max={60} value={params.SimulationAnalysisResolutionInMinutes} onChange={e=>set('SimulationAnalysisResolutionInMinutes',parseInt(e.target.value)||2)}/></label>
-            <label className="modal-row modal-row--check"><input type="checkbox" checked={params.ShouldSimulationUseActualWeatherForecastData} onChange={e=>set('ShouldSimulationUseActualWeatherForecastData',e.target.checked)}/><span className="modal-label">Use Actual Weather Forecast Data</span></label>
-            <label className="modal-row modal-row--check"><input type="checkbox" checked={params.HighSimulationAccuracy} onChange={e=>set('HighSimulationAccuracy',e.target.checked)}/><span className="modal-label">High Simulation Accuracy (ellipsoid earth model)</span></label>
-            <label className="modal-row"><span className="modal-label">Calculation Fallback Ground Speed (kt)</span><input className="modal-input" type="number" min={100} max={600} value={params.CalculationFallbackGroundSpeed} onChange={e=>set('CalculationFallbackGroundSpeed',parseFloat(e.target.value)||300)}/></label>
-          </>}
-          <div className="modal-section-title">Departure Time Windows</div>
-          <label className="modal-row"><span className="modal-label">Offset Calculation Mode</span>
-            <select className="modal-select" value={params.IntendedDepartureTimeWindowOffsetsCalculationMode} onChange={e=>set('IntendedDepartureTimeWindowOffsetsCalculationMode',e.target.value)}>
-              <option value="None">None</option><option value="EarliestRoutes">Earliest Routes</option><option value="LatestRoutes">Latest Routes</option><option value="RouteAverage">Route Average</option>
-            </select></label>
-          <label className="modal-row"><span className="modal-label">Synchronisation Longitude (°)</span><input className="modal-input" type="number" step={0.5} min={-180} max={180} value={params.DepartureTimeWindowOffsetSynchronizationLongitude} onChange={e=>set('DepartureTimeWindowOffsetSynchronizationLongitude',parseFloat(e.target.value)||-30)}/></label>
-          <div className="modal-row"><span className="modal-label">Synchronisation Time (UTC)</span><TimeSpinner value={params.DepartureTimeWindowOffsetSynchronizationTimeOfDay} onChange={v=>set('DepartureTimeWindowOffsetSynchronizationTimeOfDay',v)}/></div>
-          {mode === 'simulate' && <>
-            <div className="modal-section-title">Throughput</div>
-            <label className="modal-row"><span className="modal-label">Waypoint Throughput Calculation</span>
-              <select className="modal-select" value={params.IntendedWaypointThroughputCalculationMode} onChange={e=>set('IntendedWaypointThroughputCalculationMode',e.target.value)}>
-                <option value="None">None</option><option value="FirstWaypointsOfNATRouteSegmentsOnly">First Waypoints of NAT Route Segments Only</option><option value="AllWaypoints">All Waypoints</option>
-              </select></label>
-            <label className="modal-row"><span className="modal-label">Waypoint Count Threshold (NM)</span><input className="modal-input" type="number" step={0.5} min={0} value={params.ThresholdToCheckIfAirplaneIsCountedAtWaypointInNm} onChange={e=>set('ThresholdToCheckIfAirplaneIsCountedAtWaypointInNm',parseFloat(e.target.value)||5)}/></label>
-            <label className="modal-row modal-row--check"><input type="checkbox" checked={params.CalculateThroughputDataOnlyForManuallyProvidedSectors} onChange={e=>set('CalculateThroughputDataOnlyForManuallyProvidedSectors',e.target.checked)}/><span className="modal-label">Throughput for Manually Provided Sectors Only</span></label>
-          </>}
-        </div>
-        <div className="modal-footer">
-          <button className="planner__btn" onClick={onConfirm}>Run {label}</button>
-          <button className="planner__btn" style={{background:'var(--text-muted)'}} onClick={onClose}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── ThroughputLimitsPage ─────────────────────────────────────────────────────
-function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {}, sectorUsage = {}, departureHours = 3, tagToRoutes = {}, sectorToRoutes = {} }) {
-  const [tagLimits, setTagLimits] = useState([]);
-  const [sectors,   setSectors]   = useState([]);
-  const [saving,    setSaving]    = useState(false);
-  const [loaded,    setLoaded]    = useState(false);
-  const [tagSearch,       setTagSearch]       = useState('');
-  const [sectorSearch,    setSectorSearch]    = useState('');
-  const [tagGroupFilter,  setTagGroupFilter]  = useState('');
-  const [secGroupFilter,  setSecGroupFilter]  = useState('');
-  const [expandedTags,    setExpandedTags]    = useState(new Set());
-  const [expandedSectors, setExpandedSectors] = useState(new Set());
-
-  useEffect(() => {
-    API.loadThroughputLimits()
-      .then(r => r.ok ? r.json() : Promise.reject(`Load failed (${r.status})`))
-      .then(d => {
-        setTagLimits(d.tagLimits || []);
-        setSectors(d.sectors || []);
-        setLoaded(true);
-      })
-      .catch(err => addToast(String(err), 'error'));
-  }, []);
-
-  const setTagLimit = (tag, value) => {
-    const num = value === '' || value === null ? 65535 : Math.min(65535, Math.max(0, Number(value)));
-    setTagLimits(prev => prev.map(t => t.tag === tag ? { ...t, maximumAircraftPerHour: num } : t));
-  };
-
-  const setSectorLimit = (id, value) => {
-    const num = value === '' || value === null ? 65535 : Math.min(65535, Math.max(0, Number(value)));
-    setSectors(prev => prev.map(s => s.id === id ? { ...s, maximumAircraftPerHour: num } : s));
-  };
-
-  const handleSave = () => {
-    setSaving(true);
-    API.saveThroughputLimits({
-      tagLimits: tagLimits.map(t => ({ tag: t.tag, maximumAircraftPerHour: t.maximumAircraftPerHour ?? 65535 })),
-      sectors:   sectors.map(s => ({ id: s.id, maximumAircraftPerHour: s.maximumAircraftPerHour ?? 65535 })),
-    })
-      .then(r => r.ok ? addToast('Throughput limits saved', 'success') : Promise.reject(`Save failed (${r.status})`))
-      .catch(err => addToast(String(err), 'error'))
-      .finally(() => setSaving(false));
-  };
-
-  const toggleTag    = tag => setExpandedTags(s => { const n = new Set(s); n.has(tag) ? n.delete(tag) : n.add(tag); return n; });
-  const toggleSector = id  => setExpandedSectors(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-
-  // Collect unique route groups for filters
-  const tagGroups = useMemo(() => {
-    const gs = new Set();
-    Object.values(tagToRoutes).forEach(routes => routes.forEach(r => { if (r.routeSegmentGroup) gs.add(r.routeSegmentGroup); }));
-    return [...gs].sort();
-  }, [tagToRoutes]);
-
-  const secGroups = useMemo(() => {
-    const gs = new Set();
-    Object.values(sectorToRoutes).forEach(routes => routes.forEach(r => { if (r.routeSegmentGroup) gs.add(r.routeSegmentGroup); }));
-    return [...gs].sort();
-  }, [sectorToRoutes]);
-
-  if (!loaded) return <div className="planner__loading">Loading…</div>;
-
-  const tagQ   = tagSearch.trim().toLowerCase();
-  const secQ   = sectorSearch.trim().toLowerCase();
-
-  const visibleTags = tagLimits.filter(t => {
-    if (tagQ && !t.tag.toLowerCase().includes(tagQ)) return false;
-    if (tagGroupFilter) {
-      const routes = tagToRoutes[t.tag] || [];
-      if (!routes.some(r => r.routeSegmentGroup === tagGroupFilter)) return false;
-    }
-    return true;
-  });
-
-  const visibleSectors = sectors.filter(s => {
-    if (secQ && !s.identifier.toLowerCase().includes(secQ)) return false;
-    if (secGroupFilter) {
-      const routes = sectorToRoutes[s.identifier] || [];
-      if (!routes.some(r => r.routeSegmentGroup === secGroupFilter)) return false;
-    }
-    return true;
-  });
-
-  const fmtLimit = (acph) => (acph == null || acph >= 65535) ? '∞' : String(acph);
-  const fmtSlots = (acph) => (acph == null || acph >= 65535) ? '∞' : String(Math.floor(acph * departureHours));
-
-  const UsageBar = ({ used, limit }) => {
-    if (limit == null || limit >= 65535) return null;
-    const pct = Math.min(100, Math.round((used / limit) * 100));
-    const over = used > limit;
-    return (
-      <div className="tl-usage-bar__wrap">
-        <div className="tl-usage-bar" style={{ '--pct': `${pct}%`, '--bar-color': over ? 'var(--danger)' : pct > 80 ? 'var(--warning)' : 'var(--accent)' }} />
-        <span className={`tl-usage-val${over ? ' tl-usage-val--over' : ''}`}>{used} / {limit} ({pct}%)</span>
-      </div>
-    );
-  };
-
-  return (
-    <div className="throughput-limits">
-      <div className="throughput-limits__tables">
-
-        {/* ── Tag Limits ─────────────────────────────────────────────────── */}
-        <div className="throughput-limits__table-wrap">
-          <h3 className="throughput-limits__heading">Tag Limits</h3>
-          <div className="tl-filters">
-            <div className="throughput-limits__search-wrap">
-              <input className="throughput-limits__search" type="text" placeholder="Search tags…" value={tagSearch} onChange={e => setTagSearch(e.target.value)} />
-              {tagSearch && <button className="throughput-limits__search-clear" onClick={() => setTagSearch('')}>✕</button>}
-            </div>
-            {tagGroups.length > 0 && (
-              <select className="tl-group-filter" value={tagGroupFilter} onChange={e => setTagGroupFilter(e.target.value)}>
-                <option value="">All groups</option>
-                {tagGroups.map(g => <option key={g} value={g}>{g}</option>)}
-              </select>
-            )}
-          </div>
-          {visibleTags.length === 0
-            ? <p className="throughput-limits__empty">{tagQ || tagGroupFilter ? 'No matching tags.' : 'No tags found on any route for this event.'}</p>
-            : (
-              <table className="throughput-limits__table">
-                <thead>
-                  <tr>
-                    <th></th>
-                    <th>Tag</th>
-                    <th>Groups</th>
-                    <th>Max / Hour</th>
-                    <th>Max Slots</th>
-                    <th>Usage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleTags.map(t => {
-                    const routes   = tagToRoutes[t.tag] || [];
-                    const groups   = [...new Set(routes.map(r => r.routeSegmentGroup).filter(Boolean))].join(', ') || '—';
-                    const acph     = t.maximumAircraftPerHour;
-                    const slotLim  = (acph == null || acph >= 65535) ? null : Math.floor(acph * departureHours);
-                    const used     = tagUsage[t.tag] || 0;
-                    const isOver   = slotLim != null && used > slotLim;
-                    const expanded = expandedTags.has(t.tag);
-                    return (
-                      <React.Fragment key={t.tag}>
-                        <tr className={`tl-row${isOver ? ' tl-row--over' : ''}`} onClick={() => toggleTag(t.tag)} style={{ cursor: routes.length ? 'pointer' : 'default' }}>
-                          <td className="tl-expand-col">{routes.length > 0 ? (expanded ? '▾' : '▸') : ''}</td>
-                          <td className="tl-name">{t.tag}</td>
-                          <td className="tl-groups">{groups}</td>
-                          <td onClick={e => e.stopPropagation()}>
-                            <input
-                              className="throughput-limits__input"
-                              type="number" min={0} max={65534} disabled={!isStaff}
-                              value={(acph == null || acph >= 65535) ? '' : acph}
-                              placeholder="∞"
-                              onChange={e => setTagLimit(t.tag, e.target.value === '' ? null : e.target.value)}
-                            />
-                          </td>
-                          <td className="tl-slots">{fmtSlots(acph)}</td>
-                          <td><UsageBar used={used} limit={slotLim} /></td>
-                        </tr>
-                        {expanded && routes.map((r, i) => (
-                          <tr key={i} className="tl-subrow">
-                            <td></td>
-                            <td className="tl-subrow__name" colSpan={2}>{r.identifier}</td>
-                            <td className="tl-subrow__group" colSpan={3}>{r.routeSegmentGroup || '—'}</td>
-                          </tr>
-                        ))}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )
-          }
-        </div>
-
-        {/* ── Sector Limits ──────────────────────────────────────────────── */}
-        <div className="throughput-limits__table-wrap">
-          <h3 className="throughput-limits__heading">Sector Limits</h3>
-          <div className="tl-filters">
-            <div className="throughput-limits__search-wrap">
-              <input className="throughput-limits__search" type="text" placeholder="Search sectors…" value={sectorSearch} onChange={e => setSectorSearch(e.target.value)} />
-              {sectorSearch && <button className="throughput-limits__search-clear" onClick={() => setSectorSearch('')}>✕</button>}
-            </div>
-            {secGroups.length > 0 && (
-              <select className="tl-group-filter" value={secGroupFilter} onChange={e => setSecGroupFilter(e.target.value)}>
-                <option value="">All groups</option>
-                {secGroups.map(g => <option key={g} value={g}>{g}</option>)}
-              </select>
-            )}
-          </div>
-          {visibleSectors.length === 0
-            ? <p className="throughput-limits__empty">{secQ || secGroupFilter ? 'No matching sectors.' : 'No sectors found for this event.'}</p>
-            : (
-              <table className="throughput-limits__table">
-                <thead>
-                  <tr>
-                    <th></th>
-                    <th>Sector</th>
-                    <th>Groups</th>
-                    <th>Max / Hour</th>
-                    <th>Max Slots</th>
-                    <th>Usage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleSectors.map(s => {
-                    const routes   = sectorToRoutes[s.identifier] || [];
-                    const groups   = [...new Set(routes.map(r => r.routeSegmentGroup).filter(Boolean))].join(', ') || '—';
-                    const acph     = s.maximumAircraftPerHour;
-                    const slotLim  = (acph == null || acph >= 65535) ? null : Math.floor(acph * departureHours);
-                    const used     = sectorUsage[s.identifier] || 0;
-                    const isOver   = slotLim != null && used > slotLim;
-                    const expanded = expandedSectors.has(s.id);
-                    return (
-                      <React.Fragment key={s.id}>
-                        <tr className={`tl-row${isOver ? ' tl-row--over' : ''}`} onClick={() => toggleSector(s.id)} style={{ cursor: routes.length ? 'pointer' : 'default' }}>
-                          <td className="tl-expand-col">{routes.length > 0 ? (expanded ? '▾' : '▸') : ''}</td>
-                          <td className="tl-name">{s.identifier}</td>
-                          <td className="tl-groups">{groups}</td>
-                          <td onClick={e => e.stopPropagation()}>
-                            <input
-                              className="throughput-limits__input"
-                              type="number" min={0} max={65534} disabled={!isStaff}
-                              value={(acph == null || acph >= 65535) ? '' : acph}
-                              placeholder="∞"
-                              onChange={e => setSectorLimit(s.id, e.target.value === '' ? null : e.target.value)}
-                            />
-                          </td>
-                          <td className="tl-slots">{fmtSlots(acph)}</td>
-                          <td><UsageBar used={used} limit={slotLim} /></td>
-                        </tr>
-                        {expanded && routes.map((r, i) => (
-                          <tr key={i} className="tl-subrow">
-                            <td></td>
-                            <td className="tl-subrow__name" colSpan={2}>{r.identifier}</td>
-                            <td className="tl-subrow__group" colSpan={3}>{r.routeSegmentGroup || '—'}</td>
-                          </tr>
-                        ))}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )
-          }
-        </div>
-
-      </div>
-      {isStaff && (
-        <button className="planner__btn tl-save-btn" onClick={handleSave} disabled={saving}>
-          {saving ? 'Saving…' : 'Save Limits'}
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ─── City Pair Totals page ────────────────────────────────────────────────────
-function CityPairTotalsPage({ data, setupData }) {
-  const { deps, depRoutesByDep, tracksByDepRoute, arrRoutesByTrack, arrByArrRoute, defaultCaps } = setupData;
-
-  // Derive actual arrival airports from the route graph (setupData.arrs is ALL airports in the system)
-  const arrAirports = useMemo(() =>
-    [...new Set(Object.values(arrByArrRoute))].sort()
-  , [arrByArrRoute]);
-
-  const reachablePairs = useMemo(() => {
-    const pairs = new Set();
-    for (const dep of deps) {
-      for (const depRoute of (depRoutesByDep[dep] || [])) {
-        for (const track of (tracksByDepRoute[depRoute] || [])) {
-          for (const arrRoute of (arrRoutesByTrack[track] || [])) {
-            const arr = arrByArrRoute[arrRoute];
-            if (arr) pairs.add(`${dep}|${arr}`);
-          }
-        }
-      }
-    }
-    return pairs;
-  }, [deps, arrAirports, depRoutesByDep, tracksByDepRoute, arrRoutesByTrack, arrByArrRoute]);
-
-  const pairTotals = useMemo(() => {
-    const map = {};
-    for (const conn of (data.connections || [])) {
-      const key = `${conn.dep}|${conn.arr}`;
-      map[key] = (map[key] || 0) + (conn.value || 0);
-    }
-    return map;
-  }, [data.connections]);
-
-  const depSums = useMemo(() => {
-    const sums = {};
-    for (const dep of deps) {
-      sums[dep] = arrAirports.reduce((acc, arr) => {
-        const key = `${dep}|${arr}`;
-        return reachablePairs.has(key) ? acc + (pairTotals[key] || 0) : acc;
-      }, 0);
-    }
-    return sums;
-  }, [deps, arrAirports, pairTotals, reachablePairs]);
-
-  const arrSums = useMemo(() => {
-    const sums = {};
-    for (const arr of arrAirports) {
-      sums[arr] = deps.reduce((acc, dep) => {
-        const key = `${dep}|${arr}`;
-        return reachablePairs.has(key) ? acc + (pairTotals[key] || 0) : acc;
-      }, 0);
-    }
-    return sums;
-  }, [deps, arrAirports, pairTotals, reachablePairs]);
-
-  const grandTotal = useMemo(() => Object.values(pairTotals).reduce((a, b) => a + b, 0), [pairTotals]);
-
-  return (
-    <div className="cpt">
-      <div className="cpt__scroll-wrap">
-        <table className="cpt__table">
-          <thead>
-            <tr>
-              <th className="cpt__corner">
-                <span className="cpt__corner-dep">↓ Departure</span>
-                <span className="cpt__corner-arr">Arrival →</span>
-              </th>
-              {arrAirports.map(arr => (
-                <th key={arr} className="cpt__arr-head">{arr}</th>
-              ))}
-              <th className="cpt__summary-head cpt__summary-head--first">Assigned</th>
-              <th className="cpt__summary-head">Capacity</th>
-              <th className="cpt__summary-head">Remaining</th>
-            </tr>
-          </thead>
-          <tbody>
-            {deps.map(dep => {
-              const depCap = defaultCaps.deps[dep] ?? null;
-              const depAssigned = depSums[dep] ?? 0;
-              const depRemaining = depCap !== null ? depCap - depAssigned : null;
-              return (
-                <tr key={dep}>
-                  <td className="cpt__dep-label">{dep}</td>
-                  {arrAirports.map(arr => {
-                    const key = `${dep}|${arr}`;
-                    const possible = reachablePairs.has(key);
-                    const val = pairTotals[key] ?? 0;
-                    if (!possible) return <td key={arr} className="cpt__cell cpt__cell--impossible"></td>;
-                    if (val === 0) return <td key={arr} className="cpt__cell cpt__cell--zero">0</td>;
-                    return <td key={arr} className="cpt__cell cpt__cell--value">{val}</td>;
-                  })}
-                  <td className="cpt__summary-cell cpt__summary-cell--first">{depAssigned}</td>
-                  <td className="cpt__summary-cell">{depCap ?? '—'}</td>
-                  <td className={`cpt__summary-cell${depRemaining !== null && depRemaining < 0 ? ' cpt__summary-cell--over' : ''}`}>
-                    {depRemaining !== null ? depRemaining : '—'}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-          <tfoot>
-            <tr className="cpt__footer-row cpt__footer-row--assigned">
-              <td className="cpt__footer-label">Assigned</td>
-              {arrAirports.map(arr => (
-                <td key={arr} className="cpt__footer-cell">{arrSums[arr] ?? 0}</td>
-              ))}
-              <td className="cpt__grand-total" colSpan={3} rowSpan={3}>{grandTotal}</td>
-            </tr>
-            <tr className="cpt__footer-row">
-              <td className="cpt__footer-label">Capacity</td>
-              {arrAirports.map(arr => (
-                <td key={arr} className="cpt__footer-cell">{defaultCaps.arrs[arr] ?? '—'}</td>
-              ))}
-            </tr>
-            <tr className="cpt__footer-row">
-              <td className="cpt__footer-label">Remaining</td>
-              {arrAirports.map(arr => {
-                const cap = defaultCaps.arrs[arr] ?? null;
-                const assigned = arrSums[arr] ?? 0;
-                const rem = cap !== null ? cap - assigned : null;
-                return (
-                  <td key={arr} className={`cpt__footer-cell${rem !== null && rem < 0 ? ' cpt__footer-cell--over' : ''}`}>
-                    {rem !== null ? rem : '—'}
-                  </td>
-                );
-              })}
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </div>
-  );
-}
+import { ROW_H, HEADER_H, TRACK_COLS, BRACE_W, BRACE_COL_W, DEFAULT_SIM_PARAMS } from "./constants.js";
+import { apiFetch, API } from "./api.js";
+import { parseSlotGroups, barycentricOrder } from "./utils.js";
+import QuantityLabel    from "./components/QuantityLabel.jsx";
+import TimeSpinner      from "./components/TimeSpinner.jsx";
+import CurlyBrace       from "./components/CurlyBrace.jsx";
+import SimParamsModal   from "./components/SimParamsModal.jsx";
+import ThroughputLimitsPage from "./pages/ThroughputLimitsPage.jsx";
+import CityPairTotalsPage   from "./pages/CityPairTotalsPage.jsx";
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 export default function SlotPlanner() {
@@ -592,7 +34,7 @@ export default function SlotPlanner() {
   const [pendingMode, setPendingMode] = useState(null);
   const [toasts,      setToasts]      = useState([]);
   const [isStaff,     setIsStaff]     = useState(false);
-  const [limitViolations, setLimitViolations] = useState([]); // [{kind, name, used, limit}]
+  const [limitViolations, setLimitViolations] = useState([]);
   const [showLimitModal,  setShowLimitModal]  = useState(false);
   const svgRef  = useRef(null);
   const gridRef = useRef(null);
@@ -705,21 +147,26 @@ export default function SlotPlanner() {
         if (used > limit) violations.push({ kind: 'Tag', name: tl.tag, used, limit });
       });
       sectorLimits.forEach(s => {
-        const acph = s.maximumAircraftPerHour ?? s.maximumSlots; // compat
+        const acph = s.maximumAircraftPerHour ?? s.maximumSlots;
         if (!acph || acph >= 65535) return;
         const limit = Math.floor(acph * departureHours);
         const used = sectorUsage[s.identifier] || 0;
         if (used > limit) violations.push({ kind: 'Sector', name: s.identifier, used, limit });
       });
+      // Check caps on airports, route segments and tracks stored in data
+      deps.forEach(d      => { if (d.cap != null && d.value  > d.cap) violations.push({ kind: 'Dep Airport',  name: d.id, used: d.value,  limit: d.cap }); });
+      arrs.forEach(a      => { if (a.cap != null && a.value  > a.cap) violations.push({ kind: 'Arr Airport',  name: a.id, used: a.value,  limit: a.cap }); });
+      depRoutes.forEach(r => { if (r.cap != null && r.value  > r.cap) violations.push({ kind: 'Dep Route',    name: r.id, used: r.value,  limit: r.cap }); });
+      arrRoutes.forEach(r => { if (r.cap != null && r.value  > r.cap) violations.push({ kind: 'Arr Route',    name: r.id, used: r.value,  limit: r.cap }); });
+      tracks.forEach(t    => { if (t.cap != null && t.slots  > t.cap) violations.push({ kind: 'Track',        name: t.id, used: t.slots,  limit: t.cap }); });
       const prev = limitViolations;
       setLimitViolations(violations);
-      // Only pop the modal when new violations appear (not already shown).
       if (violations.length > 0 && violations.some(v => !prev.find(p => p.kind === v.kind && p.name === v.name))) {
         setShowLimitModal(true);
       }
     }, 600);
     return () => { if (warnTimer.current) clearTimeout(warnTimer.current); };
-  }, [connections]);
+  }, [data]);
 
   // ── Sync time (debounced, PATCH to event) ────────────────────────────────
   const handleSyncTimeChange = useCallback((val) => {
@@ -741,49 +188,32 @@ export default function SlotPlanner() {
   const vArrRoutes = arrRoutes.filter(r  => !term || filteredConns.some(c=>c.arrRoute===r.id));
   const vArrs      = arrs.filter(a      => !term || filteredConns.some(c=>c.arr===a.id));
 
-  const depOrd     = new Map(vDeps.map((d,i)=>[d.id,i]));
-  const oDR        = barycentricOrder(vDepRoutes, filteredConns,'depRoute','dep',depOrd);
-  const drOrd      = new Map(oDR.map((d,i)=>[d.id,i]));
-  const oTr        = barycentricOrder(vTracks,    filteredConns,'track','depRoute',drOrd);
-  const trOrd      = new Map(oTr.map((d,i)=>[d.id,i]));
-  const oAR        = barycentricOrder(vArrRoutes, filteredConns,'arrRoute','track',trOrd);
-  const arOrd      = new Map(oAR.map((d,i)=>[d.id,i]));
-  const oArrs      = barycentricOrder(vArrs,      filteredConns,'arr','arrRoute',arOrd);
+  const depOrd = new Map(vDeps.map((d,i)=>[d.id,i]));
+  const oDR    = barycentricOrder(vDepRoutes, filteredConns,'depRoute','dep',depOrd);
+  const drOrd  = new Map(oDR.map((d,i)=>[d.id,i]));
+  const oTr    = barycentricOrder(vTracks,    filteredConns,'track','depRoute',drOrd);
+  const trOrd  = new Map(oTr.map((d,i)=>[d.id,i]));
+  const oAR    = barycentricOrder(vArrRoutes, filteredConns,'arrRoute','track',trOrd);
+  const arOrd  = new Map(oAR.map((d,i)=>[d.id,i]));
+  const oArrs  = barycentricOrder(vArrs,      filteredConns,'arr','arrRoute',arOrd);
 
   const maxRows = Math.max(vDeps.length,oDR.length,oTr.length,oAR.length,oArrs.length,1);
   const totalH  = HEADER_H + maxRows*ROW_H;
   const itemY   = (i,n) => { const rh=maxRows*ROW_H/n; return HEADER_H+rh*i+rh/2; };
 
   // ── Dropdowns (cascading, topology-aware) ────────────────────────────────
-  const ddDeps = [...new Set([
-    ...setupData.deps,
-    ...deps.map(d => d.id),
-  ])].sort();
-
-  const ddDepRoutes = (dep) => [...new Set([
-    ...(setupData.depRoutesByDep[dep] || []),
-    ...connections.filter(c => c.dep === dep).map(c => c.depRoute),
-  ])].sort();
-
-  const ddTracks = (depRoute) => [...new Set([
-    ...(setupData.tracksByDepRoute[depRoute] || []),
-    ...connections.filter(c => c.depRoute === depRoute).map(c => c.track),
-  ])].sort();
-
-  const ddArrRoutes = (track) => [...new Set([
-    ...(setupData.arrRoutesByTrack[track] || []),
-    ...connections.filter(c => c.track === track).map(c => c.arrRoute),
-  ])].sort();
-
-  // Arrival is auto-derived from arrRoute; fall back to manual list when unknown
-  const autoArr = (arrRoute) => setupData.arrByArrRoute[arrRoute] || null;
+  const ddDeps = [...new Set([...setupData.deps, ...deps.map(d => d.id)])].sort();
+  const ddDepRoutes = (dep) => [...new Set([...(setupData.depRoutesByDep[dep] || []), ...connections.filter(c => c.dep === dep).map(c => c.depRoute)])].sort();
+  const ddTracks    = (depRoute) => [...new Set([...(setupData.tracksByDepRoute[depRoute] || []), ...connections.filter(c => c.depRoute === depRoute).map(c => c.track)])].sort();
+  const ddArrRoutes = (track) => [...new Set([...(setupData.arrRoutesByTrack[track] || []), ...connections.filter(c => c.track === track).map(c => c.arrRoute)])].sort();
+  const autoArr     = (arrRoute) => setupData.arrByArrRoute[arrRoute] || null;
 
   const selConnsAll = selectedDep ? connections.filter(c=>c.dep===selectedDep) : [];
   const selConns    = selectedDep ? filteredConns.filter(c=>c.dep===selectedDep) : [];
   const connLabel   = (conn) => { const i=selConnsAll.findIndex(c=>c.depRoute===conn.depRoute&&c.track===conn.track&&c.arrRoute===conn.arrRoute&&c.arr===conn.arr); return i>=0?String.fromCharCode(65+i):''; };
   const trackCol    = (id)   => tracks.find(t=>t.id===id)?.col||'#2A3B90';
 
-  const recomputeAggregates= (prev, newConns) => {
+  const recomputeAggregates = (prev, newConns) => {
     const da={}, dra={}, ta={}, ara={}, aa={};
     newConns.forEach(c => {
       da[c.dep]=(da[c.dep]||0)+c.value; dra[c.depRoute]=(dra[c.depRoute]||0)+c.value;
@@ -821,8 +251,6 @@ export default function SlotPlanner() {
 
   const setCap = useCallback((listKey, id, rawVal) => {
     const val = rawVal === '' || rawVal == null ? null : parseInt(rawVal, 10);
-    // For airports the stored value IS the cap (maximumSlots).
-    // For non-airports the user enters per-hour; display cap = floor(perHour × hours).
     const isAirport = listKey === 'deps' || listKey === 'arrs';
     const displayCap = (isNaN(val) || val == null) ? null
       : isAirport ? val
@@ -890,7 +318,6 @@ export default function SlotPlanner() {
     setShowModal(false);
     const mode = pendingMode;
     const nextRev = hasEdits.current ? plannerRevisions + 1 : plannerRevisions;
-    // Cancel any pending auto-save and block new ones while the submit is in flight
     if (saveTimer.current) clearTimeout(saveTimer.current);
     isSubmitting.current = true;
     setSaving(false);
@@ -948,7 +375,7 @@ export default function SlotPlanner() {
     (setupData.tagMap[c.track] || []).forEach(tag => { liveTagUsage[tag] = (liveTagUsage[tag] || 0) + c.value; });
     (setupData.sectorMap[c.track] || []).forEach(s => { liveSectorUsage[s.identifier] = (liveSectorUsage[s.identifier] || 0) + c.value; });
   });
-  const revStr    = simVersion!==null?`${simVersion}.${plannerRevisions}`:'—';
+  const revStr = simVersion!==null?`${simVersion}.${plannerRevisions}`:'—';
 
   return (
     <div className="planner" data-theme={theme} onClick={()=>setSelectedDep(null)}>
@@ -1037,9 +464,9 @@ export default function SlotPlanner() {
           </div>
           <span className="planner__meta-label">Rev <strong className="planner__rev-value">{revStr}</strong></span>
           {saving && <span className="planner__saving-indicator">Saving…</span>}
-          {simStatus === 'running'      && <span className="planner__sim-status planner__sim-status--running">Running simulator…</span>}
-          {simStatus === 'sim_responded'&& <span className="planner__sim-status planner__sim-status--saving">Saving slot times…</span>}
-          {simStatus === 'saved'        && <span className="planner__sim-status planner__sim-status--done">Finalizing…</span>}
+          {simStatus === 'running'       && <span className="planner__sim-status planner__sim-status--running">Running simulator…</span>}
+          {simStatus === 'sim_responded' && <span className="planner__sim-status planner__sim-status--saving">Saving slot times…</span>}
+          {simStatus === 'saved'         && <span className="planner__sim-status planner__sim-status--done">Finalizing…</span>}
           {!isStaff && <span className="planner__readonly-badge">Read-only</span>}
           {limitViolations.length > 0 && (
             <button className="planner__limit-alert" onClick={()=>setShowLimitModal(true)}>
@@ -1100,11 +527,10 @@ export default function SlotPlanner() {
             </div>
             <div className="planner__control-edit" ref={editRef}>
               {selConns.map(c => (
-                <div key={`${c.depRoute}-${c.track}-${c.arrRoute}-${c.arr}`} className="planner__control-row">                  <span className="planner__conn-label" style={{background:trackCol(c.track)}}>{connLabel(c)}</span>
+                <div key={`${c.depRoute}-${c.track}-${c.arrRoute}-${c.arr}`} className="planner__control-row">
+                  <span className="planner__conn-label" style={{background:trackCol(c.track)}}>{connLabel(c)}</span>
                   <select disabled={!isStaff} value={c.depRoute} onChange={e=>editConn(c,'depRoute',e.target.value)}>
-                    {ddDepRoutes(selectedDep).map(r => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
+                    {ddDepRoutes(selectedDep).map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                   <select disabled={!isStaff} value={c.track} onChange={e=>editConn(c,'track',e.target.value)}>{ddTracks(c.depRoute).map(t=><option key={t} value={t}>{t}</option>)}</select>
                   <select disabled={!isStaff} value={c.arrRoute} onChange={e=>{const ar=e.target.value;editConn(c,'arrRoute',ar);const a=autoArr(ar);if(a)setData(prev=>{const newConns=prev.connections.map(x=>x===c?{...x,arrRoute:ar,arr:a}:x);return recomputeAggregates(prev,newConns);});}}>{ddArrRoutes(c.track).map(r=><option key={r} value={r}>{r}</option>)}</select>
