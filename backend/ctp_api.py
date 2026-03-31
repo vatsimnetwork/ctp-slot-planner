@@ -258,7 +258,7 @@ def derive_setup(route_segments: list, airports: list, departure_time_window_ns:
     def seg_cap(seg):
         # Non-airport throughput points: edit per-hour, show total slots
         v = seg.get("maximumAircraftPerHour", 0)
-        if not v:
+        if not v or v >= 65535:
             return None
         total = int(v * departure_hours)
         return total if total else None
@@ -267,7 +267,9 @@ def derive_setup(route_segments: list, airports: list, departure_time_window_ns:
         # Airports: show and edit maximum_slots directly
         a = airport_map.get(icao, {})
         v = a.get("maximumSlots", 0)
-        return int(v) if v else None
+        if not v or v >= 65535:
+            return None
+        return int(v)
 
     default_caps = {
         "deps":      {icao: airport_cap(icao) for icao in dep_routes_by_dep if airport_cap(icao)},
