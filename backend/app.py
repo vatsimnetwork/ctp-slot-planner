@@ -57,6 +57,37 @@ def _from_api_time(t: str) -> str:
     return t
 
 
+def _from_api_datetime(dt_str: str) -> str:
+    """Extract UTC time from an ISO-8601 datetime string → '1700z'."""
+    from datetime import timezone
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        dt_utc = dt.astimezone(timezone.utc)
+        return f"{dt_utc.hour:02d}{dt_utc.minute:02d}z"
+    except Exception:
+        return ""
+
+
+def _to_api_datetime(spinner_val: str, event_date_str: str) -> str | None:
+    """Convert a TimeSpinner value '1700z' + event date '2025-04-01' → RFC3339 UTC datetime string."""
+    try:
+        val = (spinner_val or "").strip().lower().rstrip("z")
+        if len(val) == 4:
+            hh, mm = int(val[:2]), int(val[2:])
+        elif ":" in val:
+            parts = val.split(":")
+            hh, mm = int(parts[0]), int(parts[1])
+        else:
+            return None
+        from datetime import datetime, timezone
+        date_parts = event_date_str.split("-")
+        dt = datetime(int(date_parts[0]), int(date_parts[1]), int(date_parts[2]), hh, mm, 0, tzinfo=timezone.utc)
+        return dt.isoformat().replace("+00:00", "Z")
+    except Exception:
+        return None
+
+
 # ─── /setup/ ──────────────────────────────────────────────────────────────────
 
 @app.get("/setup/")
@@ -157,6 +188,24 @@ def setup():
                         {"identifier": ident, "routeSegmentGroup": group}
                     )
 
+    # Build per-airport departure time window start map (ICAO → "HHMMz")
+    dep_times = {}
+    arr_times = {}
+    for a in airports:
+        icao = (a.get("waypoint", {}).get("identifier") or a.get("identifier") or "").strip().upper()
+        if not icao:
+            continue
+        dtws = a.get("departureTimeWindowStart")
+        if dtws:
+            spinner_val = _from_api_datetime(dtws)
+            if spinner_val:
+                dep_times[icao] = spinner_val
+        eat = a.get("earliestArrivalTime")
+        if eat:
+            spinner_val = _from_api_datetime(eat)
+            if spinner_val:
+                arr_times[icao] = spinner_val
+
     return jsonify({
         **derived,
         "routesRevision": routes_revision,
@@ -169,6 +218,8 @@ def setup():
         "tagToRoutes": tag_to_routes,
         "sectorToRoutes": sector_to_routes,
         "eventId": ctp_api.event_id(),
+        "depTimes": dep_times,
+        "arrTimes": arr_times,
     })
 
 
@@ -259,7 +310,7 @@ def submit_slotgroups():
     sim_params = body.get("simulatorParams", {})
 
     # The Go API stores these as int enums (iota); the frontend sends the string names.
-    _SLOT_GENERATION_MODE = {"MaximizeSlots": 0, "Random": 1, "VoteProportional": 2}
+    _SLOT_GENERATION_MODE = {"Random": 0, "MaximizeAirportPairs": 1, "MaximizeSlots": 2}
     _DTW_OFFSETS_MODE     = {"None": 0, "EarliestRoutes": 1, "LatestRoutes": 2, "RouteAverage": 3}
     _WAYPOINT_TP_MODE     = {"None": 0, "FirstWaypointsOfNATRouteSegmentsOnly": 1, "AllWaypoints": 2}
 
@@ -468,6 +519,40 @@ def update_cap():
             result = ctp_api.patch_route_segment_capacity(int(entity_id), maximum_aircraft_per_hour=int(value))
         else:
             return jsonify({"error": f"Unknown type: {entity_type}"}), 400
+    except requests.HTTPError as e:
+        return _ext_error(e)
+    except requests.ConnectionError:
+        return jsonify({"error": "Cannot reach the CTP API"}), 502
+
+    return jsonify({"ok": True, "result": result})
+
+
+# ─── /airports/<id>/departure-time/ ──────────────────────────────────────────
+
+@app.post("/airports/<int:airport_id>/departure-time/")
+def update_airport_departure_time(airport_id: int):
+    user = auth.validate_session(request)
+    _require_staff(user)
+    body = request.get_json(force=True)
+    spinner_val = body.get("departureTimeWindowStart")  # "HHMMz" from TimeSpinner
+
+    if not spinner_val:
+        return jsonify({"error": "departureTimeWindowStart required"}), 400
+
+    # We need the event date to reconstruct a full datetime
+    try:
+        event = ctp_api.get_event_basic()
+    except (requests.HTTPError, requests.ConnectionError) as e:
+        return jsonify({"error": str(e)}), 502
+
+    event_date_str = (event.get("date") or "")[:10] if event else ""
+    iso_str = _to_api_datetime(spinner_val, event_date_str) if event_date_str else None
+
+    if not iso_str:
+        return jsonify({"error": "Could not convert departure time; ensure event date is set"}), 400
+
+    try:
+        result = ctp_api.patch_airport_departure_time_window_start(airport_id, iso_str)
     except requests.HTTPError as e:
         return _ext_error(e)
     except requests.ConnectionError:

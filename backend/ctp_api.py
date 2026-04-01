@@ -94,6 +94,10 @@ def patch_airport_capacity(airport_id: int, maximum_slots: int):
     return _patch(f"/airports/{airport_id}/capacity", {"maximumSlots": maximum_slots})
 
 
+def patch_airport_departure_time_window_start(airport_id: int, iso_str: str):
+    return _patch(f"/airports/{airport_id}/departure-time-window-start", {"departureTimeWindowStart": iso_str})
+
+
 def patch_route_segment_capacity(segment_id: int, maximum_aircraft_per_hour: int):
     return _patch(f"/route-segments/{segment_id}/capacity", {"maximumAircraftPerHour": maximum_aircraft_per_hour})
 

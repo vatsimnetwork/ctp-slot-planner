@@ -17,7 +17,7 @@ export default function SimParamsModal({ mode, params, onParamsChange, onConfirm
             <label className="modal-row"><span className="modal-label">Slot Generation Mode</span>
               <select className="modal-select" value={params.IntendedSlotGenerationMode} onChange={e => set('IntendedSlotGenerationMode', e.target.value)}>
                 <option value="MaximizeSlots">Maximize Slots</option>
-                <option value="VoteProportional">Vote Proportional</option>
+                <option value="MaximizeAirportPairs">Maximize Airport Pairs</option>
                 <option value="Random">Random</option>
               </select>
             </label>

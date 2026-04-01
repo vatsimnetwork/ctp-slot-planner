@@ -24,8 +24,8 @@ export default function SlotPlanner() {
   const [simVersion,       setSimVersion]       = useState(null);
   const [plannerRevisions, setPlannerRevisions] = useState(0);
   const [selectedDep, setSelectedDep] = useState(null);
-  const [syncTime,    setSyncTime]    = useState('1600z');
-  const syncTimer = useRef(null);
+  const [depTimes,    setDepTimes]    = useState({});
+  const [arrTimes,    setArrTimes]    = useState({});
   const [newRoute,    setNewRoute]    = useState({ dep:'', depRoute:'', track:'', arrRoute:'', arr:'', value:0 });
   const [searchTerm,  setSearchTerm]  = useState('');
   const [simParams,   setSimParams]   = useState({ ...DEFAULT_SIM_PARAMS });
@@ -56,7 +56,7 @@ export default function SlotPlanner() {
   const dismissToast = (id) => setToasts(p => p.filter(t=>t.id!==id));
 
   // ── Load ──────────────────────────────────────────────────────────────────
-  useEffect(() => {
+  const loadAll = useCallback(() => {
     setLoading(true);
     Promise.all([
       API.loadSetup().then(r => r.ok ? r.json() : Promise.reject(`Setup failed (${r.status})`)),
@@ -83,9 +83,10 @@ export default function SlotPlanner() {
         sectorToRoutes:   setup.sectorToRoutes||{},
       });
       setIsStaff(setup.isStaff ?? false);
-      if (setup.syncTime) setSyncTime(setup.syncTime);
       if (setup.eventId)  eventIdRef.current = setup.eventId;
       setSimParams(p => ({ ...p, DepartureTimeWindowOffsetSynchronizationTimeOfDay: setup.syncTime || p.DepartureTimeWindowOffsetSynchronizationTimeOfDay }));
+      if (setup.depTimes) setDepTimes(setup.depTimes);
+      if (setup.arrTimes) setArrTimes(setup.arrTimes);
       const slotGroups = Array.isArray(raw) ? raw : (raw.slotGroups ?? []);
       setData(parseSlotGroups(slotGroups, setup.defaultCaps ?? {}));
       if (!Array.isArray(raw)) {
@@ -95,7 +96,9 @@ export default function SlotPlanner() {
     })
     .catch(err => addToast(String(err), 'error'))
     .finally(() => setLoading(false));
-  }, []);
+  }, [addToast]);
+
+  useEffect(() => { loadAll(); }, []);
 
   useEffect(() => { if (selectedDep) setNewRoute(p => ({...p, dep:selectedDep, depRoute:''})); }, [selectedDep]);
 
@@ -162,16 +165,18 @@ export default function SlotPlanner() {
     return () => { if (warnTimer.current) clearTimeout(warnTimer.current); };
   }, [data]);
 
-  // ── Sync time (debounced, PATCH to event) ────────────────────────────────
-  const handleSyncTimeChange = useCallback((val) => {
-    setSyncTime(val);
-    setSimParams(p => ({ ...p, DepartureTimeWindowOffsetSynchronizationTimeOfDay: val }));
+  // ── Per-airport departure time window start ───────────────────────────────
+  const handleDepTimeChange = useCallback((icao, val) => {
+    setDepTimes(p => ({ ...p, [icao]: val }));
     if (!isStaff) return;
-    if (syncTimer.current) clearTimeout(syncTimer.current);
-    syncTimer.current = setTimeout(() => {
-      API.syncTime(val).catch(() => addToast('Failed to save synchronization time', 'error'));
-    }, 800);
-  }, [isStaff, addToast]);
+    const dbId = setupData.dbIds.airports[icao];
+    if (!dbId) return;
+    apiFetch(`/airports/${dbId}/departure-time/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ departureTimeWindowStart: val }),
+    }).catch(() => addToast(`Failed to save departure time for ${icao}`, 'error'));
+  }, [isStaff, setupData.dbIds, addToast]);
 
   // ── Search filter ─────────────────────────────────────────────────────────
   const term = searchTerm.trim().toLowerCase();
@@ -331,7 +336,7 @@ export default function SlotPlanner() {
         addToast(`${mode==='calculate'?'Calculation':'Simulation'} complete — rev ${simVersion}.${nextRev}`,'success');
       })
       .catch(err=>addToast(err.message,'error'))
-      .finally(() => { isSubmitting.current = false; if (mode === 'simulate') stopSimPoll(); });
+      .finally(() => { isSubmitting.current = false; if (mode === 'simulate') stopSimPoll(); loadAll(); });
   };
 
   // ── Layout effects ────────────────────────────────────────────────────────
@@ -460,14 +465,6 @@ export default function SlotPlanner() {
           <button className={`planner__tab${activeTab === 'cityPairTotals' ? ' planner__tab--active' : ''}`} onClick={() => setActiveTab('cityPairTotals')}>City Pair Totals</button>
         </div>
         <div className="planner__topbar-right">
-          <div className="planner__start-time">
-            <span
-              className="planner__meta-label"
-              title="The time the simulator calculates all aircraft to be at −30° longitude. Departure and arrival times are calculated relative to this synchronization point."
-              style={{cursor:'help',borderBottom:'1px dotted var(--text-muted)'}}
-            >Sync Time</span>
-            <TimeSpinner value={syncTime} onChange={handleSyncTimeChange} style={!isStaff?{pointerEvents:'none',opacity:.5}:{}}/>
-          </div>
           <span className="planner__meta-label">Rev <strong className="planner__rev-value">{revStr}</strong></span>
           {simStatus === 'running'       && <span className="planner__sim-status planner__sim-status--running">Running simulator…</span>}
           {simStatus === 'sim_responded' && <span className="planner__sim-status planner__sim-status--saving">Saving slot times…</span>}
@@ -636,7 +633,10 @@ export default function SlotPlanner() {
           <div className="planner__header">Departure</div>
           {vDeps.map(dep => { const isSel=selectedDep===dep.id; const dData=deps.find(d=>d.id===dep.id); return (
             <div key={dep.id} className={`planner__cell planner__cell--dep${isSel?' planner__cell--selected':''}${!isSel&&selectedDep?' planner__cell--dimmed':''}`} style={{height:maxRows*ROW_H/vDeps.length}} onClick={e=>{e.stopPropagation();setSelectedDep(isSel?null:dep.id);}}>
-              <div className="planner__cell-dep-info"><span className="planner__cell-name">{dep.id}</span></div>
+              <div className="planner__cell-dep-info">
+                <span className="planner__cell-name">{dep.id}</span>
+                <TimeSpinner value={depTimes[dep.id] || ''} onChange={v => handleDepTimeChange(dep.id, v)} style={!isStaff?{pointerEvents:'none',opacity:.5}:{fontSize:'0.75rem'}}/>
+              </div>
               <div className="planner__cell-dep-right">
                 <QuantityLabel used={dData?.value??0} cap={dData?.cap} size="lg"/>
                 {isSel && selConnsAll.length>0 && <div className="planner__label-cluster">{selConnsAll.map((c,i)=><span key={i} className="planner__conn-label" style={{background:trackCol(c.track)}}>{String.fromCharCode(65+i)}</span>)}</div>}
@@ -698,7 +698,10 @@ export default function SlotPlanner() {
             <div key={arr.id} className="planner__cell planner__cell--right" style={{height:maxRows*ROW_H/oArrs.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
               <QuantityLabel used={aData?.value??0} cap={aData?.cap} size="lg"/>
               {selectedDep&&ac.map(c=><span key={`${c.track}-${c.depRoute}`} className="planner__conn-label" style={{background:trackCol(c.track)}}>{connLabel(c)}</span>)}
-              <div className="planner__cell-arr-info"><span className="planner__cell-name">{arr.id}</span></div>
+              <div className="planner__cell-arr-info">
+                <span className="planner__cell-name">{arr.id}</span>
+                {arrTimes[arr.id] && <TimeSpinner value={arrTimes[arr.id]} onChange={()=>{}} style={{pointerEvents:'none',opacity:.7,fontSize:'0.75rem'}}/>}
+              </div>
             </div>
           );})}
         </div>
