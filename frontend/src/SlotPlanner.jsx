@@ -424,7 +424,7 @@ export default function SlotPlanner() {
               <button className="modal-close" onClick={()=>setShowLimitModal(false)}>✕</button>
             </div>
             <div className="modal-body">
-              <p className="limit-warning__intro">The following limits are exceeded by the current route plan. The simulator will be unable to allocate all requested slots.</p>
+              <p className="limit-warning__intro">The following limits are exceeded by the current route plan.</p>
               <table className="limit-warning__table">
                 <thead><tr><th>Type</th><th>Name</th><th>Used</th><th>Limit</th><th>Over by</th></tr></thead>
                 <tbody>
@@ -483,6 +483,15 @@ export default function SlotPlanner() {
             >
               {saving ? 'Saving…' : isDirty ? 'Save Draft ●' : 'Saved'}
             </button>
+          )}
+          {isStaff && connections.length > 0 && (
+            <button className="planner__btn planner__btn--destructive" onClick={() => {
+              if (window.confirm('Clear all slots? This cannot be undone.')) {
+                hasEdits.current = true;
+                setIsDirty(true);
+                setData(prev => recomputeAggregates(prev, []));
+              }
+            }}>Clear All Slots</button>
           )}
           <button disabled={!isStaff} className="planner__btn" onClick={()=>{setPendingMode('calculate');setShowConfirm(true);}}>Calculate Slots</button>
           <button disabled={!isStaff} className="planner__btn planner__btn--sim" onClick={()=>{setPendingMode('simulate');setShowModal(true);}}>Simulate Slots</button>

@@ -236,7 +236,7 @@ def get_slotgroups():
     except requests.ConnectionError:
         return jsonify({"error": "Cannot reach the CTP API"}), 502
 
-    routes_revision = rev["number"] if rev else None
+    routes_revision   = rev["number"] if rev else None
     planner_revisions = latest.get("number", 0) if latest else 0
 
     slot_groups, caps = [], {}
@@ -244,8 +244,44 @@ def get_slotgroups():
     if latest:
         draft = _parse_commentary(latest.get("slotPlannerDraftCommentary", ""))
         if draft:
-            slot_groups = draft.get("slotGroups", [])
-            caps        = draft.get("caps", {})
+            raw_groups = draft.get("slotGroups", [])
+            caps       = draft.get("caps", {})
+
+            if raw_groups:
+                try:
+                    route_segments = ctp_api.get_route_segments()
+                    airports       = ctp_api.get_airports()
+                except Exception:
+                    route_segments, airports = [], []
+
+                if _is_new_draft_format(raw_groups):
+                    # New ID-based format: resolve IDs to current identifiers for the frontend.
+                    airport_ident_by_id, rs_ident_by_id = _build_ident_lookups(route_segments, airports)
+                    slot_groups = _id_groups_to_ident_groups(raw_groups, airport_ident_by_id, rs_ident_by_id)
+                else:
+                    # Legacy identifier format: auto-migrate to ID-based and save back.
+                    import sys
+                    print("[slot-planner] MIGRATION: draft uses legacy identifier format — migrating to ID-based", file=sys.stderr)
+                    airport_id_by_ident, rs_id_by_ident = _build_id_lookups(route_segments, airports)
+                    id_based = _ident_groups_to_id_groups(raw_groups, airport_id_by_ident, rs_id_by_ident)
+
+                    new_commentary = json.dumps({
+                        "slotGroups": id_based,
+                        "caps":       caps,
+                        "draft":      True,
+                    })
+                    try:
+                        ctp_api.update_slot_revision(latest["id"], {
+                            "slotPlannerDraftCommentary": new_commentary,
+                        })
+                        print(f"[slot-planner] MIGRATION: saved {len(id_based)} ID-based slot groups "
+                              f"({len(raw_groups) - len(id_based)} could not be resolved)", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[slot-planner] MIGRATION: failed to save migrated draft: {e}", file=sys.stderr)
+
+                    # Return identifier format to frontend (resolved from the freshly migrated IDs)
+                    airport_ident_by_id, rs_ident_by_id = _build_ident_lookups(route_segments, airports)
+                    slot_groups = _id_groups_to_ident_groups(id_based, airport_ident_by_id, rs_ident_by_id)
 
     return jsonify({
         "slotGroups":       slot_groups,
@@ -263,8 +299,23 @@ def save_slotgroups():
     _require_staff(user)
     body = request.get_json(force=True)
 
+    ident_groups = body.get("slotGroups", [])
+
+    # Convert identifier-based slot groups from the frontend to ID-based format for storage.
+    id_based_groups = []
+    if ident_groups:
+        try:
+            route_segments = ctp_api.get_route_segments()
+            airports       = ctp_api.get_airports()
+        except requests.HTTPError as e:
+            return _ext_error(e)
+        except requests.ConnectionError:
+            return jsonify({"error": "Cannot reach the CTP API"}), 502
+        airport_id_by_ident, rs_id_by_ident = _build_id_lookups(route_segments, airports)
+        id_based_groups = _ident_groups_to_id_groups(ident_groups, airport_id_by_ident, rs_id_by_ident)
+
     commentary = json.dumps({
-        "slotGroups": body.get("slotGroups", []),
+        "slotGroups": id_based_groups,
         "caps":       body.get("caps", {}),
         "draft":      True,
     })
@@ -382,6 +433,7 @@ def _submit_simulate(body: dict):
        Go will update slot times and create a draft revision in the same transaction.
     5. If Go returned a draftRevisionNumber, use it; otherwise create the draft here.
     Returns (slot_groups, caps, new_planner_revisions).
+    slot_groups returned are in identifier format for the frontend.
     """
     caps = body.get("caps", {})
 
@@ -392,11 +444,17 @@ def _submit_simulate(body: dict):
     if draft:
         caps = draft.get("caps", caps)
 
-    # Build db_ids lookup for airports and route segments
+    # Build lookups for airports and route segments
     route_segments = ctp_api.get_route_segments()
     airports = ctp_api.get_airports()
     derived = ctp_api.derive_setup(route_segments, airports)
     db_ids = derived["dbIds"]
+
+    # Normalize slot_groups to ID-based format for storage and slot generation.
+    # The draft is already ID-based after our migration; the body may still be identifier-based.
+    if slot_groups and not _is_new_draft_format(slot_groups):
+        airport_id_by_ident, rs_id_by_ident = _build_id_lookups(route_segments, airports)
+        slot_groups = _ident_groups_to_id_groups(slot_groups, airport_id_by_ident, rs_id_by_ident)
 
     # Create a new revision to hold the actual slots (this becomes "locked" after simulate)
     sim_revision = ctp_api.create_slot_revision(metadata={
@@ -416,6 +474,7 @@ def _submit_simulate(body: dict):
     commentary = ""
     draft_revision_number = None
     try:
+        # Pass ID-based slot_groups; Go stores them as-is in the new draft's commentary.
         sim_result = ctp_api.simulate_slots(slot_groups=slot_groups, caps=caps)
         commentary = (sim_result or {}).get("simulationOutputCommentary", "")
         draft_revision_number = (sim_result or {}).get("draftRevisionNumber")
@@ -428,7 +487,7 @@ def _submit_simulate(body: dict):
         planner_revisions = draft_revision_number
     else:
         draft_commentary = json.dumps({
-            "slotGroups": slot_groups,
+            "slotGroups": slot_groups,  # ID-based
             "caps":       caps,
             "draft":      True,
         })
@@ -438,7 +497,11 @@ def _submit_simulate(body: dict):
             })
         planner_revisions = draft_revision.get("number", body.get("plannerRevisions", 0))
 
-    return slot_groups, caps, planner_revisions, sim_warning, commentary
+    # Convert ID-based slot_groups to identifier format for the frontend response.
+    airport_ident_by_id, rs_ident_by_id = _build_ident_lookups(route_segments, airports)
+    ident_slot_groups = _id_groups_to_ident_groups(slot_groups, airport_ident_by_id, rs_ident_by_id)
+
+    return ident_slot_groups, caps, planner_revisions, sim_warning, commentary
 
 
 def _submit_calculate(body: dict):
@@ -449,7 +512,7 @@ def _submit_calculate(body: dict):
     # Fetch the newly created revision (now the latest) with full slot data
     calc_revision = ctp_api.get_latest_slot_revision()
 
-    # Reverse-map slots → slot groups
+    # Reverse-map slots → identifier-based slot groups (for the frontend response)
     route_segments = ctp_api.get_route_segments()
     airports = ctp_api.get_airports()
     raw_slots = calc_revision.get("slots", []) if calc_revision else []
@@ -462,9 +525,13 @@ def _submit_calculate(body: dict):
     derived = ctp_api.derive_setup(route_segments, airports)
     caps = derived["defaultCaps"]
 
+    # Convert slot_groups to ID-based format for storage in the draft.
+    airport_id_by_ident, rs_id_by_ident = _build_id_lookups(route_segments, airports)
+    id_based_groups = _ident_groups_to_id_groups(slot_groups, airport_id_by_ident, rs_id_by_ident)
+
     # Create the draft revision for editing
     draft_commentary = json.dumps({
-        "slotGroups": slot_groups,
+        "slotGroups": id_based_groups,  # ID-based for stability across renames
         "caps":       caps,
         "draft":      True,
     })
@@ -474,6 +541,7 @@ def _submit_calculate(body: dict):
     })
 
     planner_revisions = draft_revision.get("number", body.get("plannerRevisions", 0))
+    # Return identifier-based slot_groups to the frontend
     return slot_groups, caps, planner_revisions, commentary
 
 
@@ -616,7 +684,6 @@ def health():
 def _split_slot_id(id_str):
     parts = id_str.split('|')
     return parts if len(parts) == 5 else None
-    return parts
 
 
 def _parse_commentary(raw: str):
@@ -628,43 +695,171 @@ def _parse_commentary(raw: str):
         return None
 
 
+def _is_new_draft_format(slot_groups: list) -> bool:
+    """Return True if slot_groups use the ID-based draft format (has depAirportId field)."""
+    return bool(slot_groups) and "depAirportId" in slot_groups[0]
+
+
+def _build_id_lookups(route_segments: list, airports: list):
+    """Return (airport_id_by_ident, rs_id_by_ident) maps for converting identifiers → DB IDs."""
+    def norm(v):
+        return (v or "").strip().upper()
+    airport_id_by_ident = {
+        norm(a.get("waypoint", {}).get("identifier", "") or a.get("identifier", "")): a["id"]
+        for a in (airports or []) if a.get("id")
+    }
+    rs_id_by_ident = {
+        (seg.get("identifier") or "").strip(): seg["id"]
+        for seg in (route_segments or []) if seg.get("id")
+    }
+    return airport_id_by_ident, rs_id_by_ident
+
+
+def _build_ident_lookups(route_segments: list, airports: list):
+    """Return (airport_ident_by_id, rs_ident_by_id) maps for converting DB IDs → identifiers."""
+    def norm(v):
+        return (v or "").strip().upper()
+    airport_ident_by_id = {
+        a["id"]: norm(a.get("waypoint", {}).get("identifier", "") or a.get("identifier", ""))
+        for a in (airports or []) if a.get("id")
+    }
+    rs_ident_by_id = {
+        seg["id"]: (seg.get("identifier") or "").strip()
+        for seg in (route_segments or []) if seg.get("id")
+    }
+    return airport_ident_by_id, rs_ident_by_id
+
+
+def _ident_groups_to_id_groups(slot_groups: list, airport_id_by_ident: dict, rs_id_by_ident: dict) -> list:
+    """
+    Convert identifier-based slot groups [{id: "dep|depRoute|track|arrRoute|arr", value}]
+    to ID-based [{depAirportId, depRouteId, trackId, arrRouteId, arrAirportId, value}].
+    Logs and skips groups where any part cannot be resolved.
+    """
+    import sys
+    result = []
+    for group in slot_groups:
+        gid   = group.get("id", "")
+        value = int(group.get("value", 0))
+        if value <= 0:
+            continue
+        parts = _split_slot_id(gid)
+        if not parts:
+            print(f"[slot-planner] WARNING: malformed slot group id '{gid}' — skipped", file=sys.stderr)
+            continue
+        dep, dep_route, track, arr_route, arr = parts
+        dep_airport_id = airport_id_by_ident.get(dep)
+        dep_route_id   = rs_id_by_ident.get(dep_route)
+        track_id       = rs_id_by_ident.get(track)
+        arr_route_id   = rs_id_by_ident.get(arr_route)
+        arr_airport_id = airport_id_by_ident.get(arr)
+        if not all([dep_airport_id, dep_route_id, track_id, arr_route_id, arr_airport_id]):
+            missing = []
+            if not dep_airport_id: missing.append(f"dep airport '{dep}'")
+            if not dep_route_id:   missing.append(f"depRoute '{dep_route}'")
+            if not track_id:       missing.append(f"track '{track}'")
+            if not arr_route_id:   missing.append(f"arrRoute '{arr_route}'")
+            if not arr_airport_id: missing.append(f"arr airport '{arr}'")
+            print(
+                f"[slot-planner] WARNING: could not resolve {', '.join(missing)} "
+                f"for slot group '{gid}' ({value} slots) — skipped",
+                file=sys.stderr,
+            )
+            continue
+        result.append({
+            "depAirportId": dep_airport_id,
+            "depRouteId":   dep_route_id,
+            "trackId":      track_id,
+            "arrRouteId":   arr_route_id,
+            "arrAirportId": arr_airport_id,
+            "value":        value,
+        })
+    return result
+
+
+def _id_groups_to_ident_groups(slot_groups: list, airport_ident_by_id: dict, rs_ident_by_id: dict) -> list:
+    """
+    Convert ID-based slot groups [{depAirportId, depRouteId, trackId, arrRouteId, arrAirportId, value}]
+    to identifier-based [{id: "dep|depRoute|track|arrRoute|arr", value}].
+    Logs and skips groups where any ID cannot be resolved to a current identifier
+    (e.g. a route or airport was deleted).
+    """
+    import sys
+    result = []
+    for group in slot_groups:
+        value = int(group.get("value", 0))
+        if value <= 0:
+            continue
+        dep   = airport_ident_by_id.get(group.get("depAirportId"))
+        dr    = rs_ident_by_id.get(group.get("depRouteId"))
+        track = rs_ident_by_id.get(group.get("trackId"))
+        ar    = rs_ident_by_id.get(group.get("arrRouteId"))
+        arr   = airport_ident_by_id.get(group.get("arrAirportId"))
+        if not all([dep, dr, track, ar, arr]):
+            missing = []
+            if not dep:   missing.append(f"depAirportId={group.get('depAirportId')}")
+            if not dr:    missing.append(f"depRouteId={group.get('depRouteId')}")
+            if not track: missing.append(f"trackId={group.get('trackId')}")
+            if not ar:    missing.append(f"arrRouteId={group.get('arrRouteId')}")
+            if not arr:   missing.append(f"arrAirportId={group.get('arrAirportId')}")
+            print(
+                f"[slot-planner] WARNING: could not resolve {', '.join(missing)} "
+                f"({value} slots) — route or airport may have been deleted",
+                file=sys.stderr,
+            )
+            continue
+        result.append({"id": f"{dep}|{dr}|{track}|{ar}|{arr}", "value": value})
+    return result
+
+
 def _generate_slots_from_groups(slot_groups: list, db_ids: dict) -> list:
-    airport_ids   = db_ids.get("airports", {})
-    rs_ids        = db_ids.get("routeSegments", {})
+    """
+    Generate slot records from slot groups for submission to the API.
+    Handles both the new ID-based format ({depAirportId, depRouteId, ...}) and
+    the legacy identifier-based format ({id: "dep|depRoute|track|arrRoute|arr"}).
+    """
+    airport_ids = db_ids.get("airports", {})
+    rs_ids      = db_ids.get("routeSegments", {})
     result = []
 
     for group in slot_groups:
-        gid   = group.get("id", "")
         count = int(group.get("value", 0))
         if count <= 0:
             continue
 
-        parts = _split_slot_id(gid)
-        if not parts:
-            continue
-        dep, dep_route, track, arr_route, arr = parts
+        if "depAirportId" in group:
+            # New ID-based format — use IDs directly
+            dep_airport_id = group.get("depAirportId")
+            dep_route_id   = group.get("depRouteId")
+            track_id       = group.get("trackId")
+            arr_route_id   = group.get("arrRouteId")
+            arr_airport_id = group.get("arrAirportId")
+            gid = f"ids:{dep_airport_id}|{dep_route_id}|{track_id}|{arr_route_id}|{arr_airport_id}"
+        else:
+            # Legacy identifier-based format
+            gid   = group.get("id", "")
+            parts = _split_slot_id(gid)
+            if not parts:
+                continue
+            dep, dep_route, track, arr_route, arr = parts
+            dep_airport_id = airport_ids.get(dep)
+            dep_route_id   = rs_ids.get(dep_route)
+            track_id       = rs_ids.get(track)
+            arr_route_id   = rs_ids.get(arr_route)
+            arr_airport_id = airport_ids.get(arr)
 
-        dep_airport_id = airport_ids.get(dep)
-        arr_airport_id = airport_ids.get(arr)
-        dep_route_id   = rs_ids.get(dep_route)
-        track_id       = rs_ids.get(track)
-        arr_route_id   = rs_ids.get(arr_route)
-
-        if not all([dep_airport_id, arr_airport_id, dep_route_id, track_id, arr_route_id]):
+        if not all([dep_airport_id, dep_route_id, track_id, arr_route_id, arr_airport_id]):
             import sys
             print(
-                f"[slot-planner] WARNING: could not resolve all IDs for group '{gid}' "
-                f"(dep={dep_airport_id}, arr={arr_airport_id}, "
-                f"depRoute={dep_route_id}, track={track_id}, arrRoute={arr_route_id}) — skipping",
+                f"[slot-planner] WARNING: could not resolve all IDs for group '{gid}' — skipping",
                 file=sys.stderr,
             )
             continue
 
-        route_segments = [{"id": dep_route_id}, {"id": track_id}, {"id": arr_route_id}]
-        slot_template  = {
+        slot_template = {
             "departureAirportId": dep_airport_id,
             "arrivalAirportId":   arr_airport_id,
-            "routeSegments":      route_segments,
+            "routeSegments":      [{"id": dep_route_id}, {"id": track_id}, {"id": arr_route_id}],
         }
         result.extend([slot_template.copy() for _ in range(count)])
 
