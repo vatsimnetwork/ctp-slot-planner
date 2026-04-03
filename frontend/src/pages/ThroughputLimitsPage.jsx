@@ -1,16 +1,17 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { API } from '../api.js';
 
-function UsageBar({ used, limit, acph }) {
+function UsageBar({ used, limit, departureHours }) {
   if (limit == null || limit >= 65535) return null;
   const pct    = Math.round((used / limit) * 100);
   const barPct = Math.min(100, pct);
   const over   = used > limit;
+  const needed = over ? Math.ceil(used / departureHours) : null;
   return (
     <div className="tl-usage-bar__wrap">
       <div className="tl-usage-bar" style={{ '--pct': `${barPct}%`, '--bar-color': over ? 'var(--danger)' : pct > 80 ? 'var(--warning)' : 'var(--accent)' }} />
       <span className={`tl-usage-val${over ? ' tl-usage-val--over' : ''}`}>
-        {used} / {limit} ({pct}%){acph != null && acph < 65535 ? ` — max ${acph}/hr` : ''}
+        {used} / {limit} ({pct}%){needed != null ? ` — needs ${needed}/hr` : ''}
       </span>
     </div>
   );
@@ -148,7 +149,7 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
                             />
                           </td>
                           <td className="tl-slots">{fmtSlots(acph)}</td>
-                          <td><UsageBar used={used} limit={slotLim} acph={acph} /></td>
+                          <td><UsageBar used={used} limit={slotLim} departureHours={departureHours} /></td>
                         </tr>
                         {expanded && routes.map((r, i) => (
                           <tr key={i} className="tl-subrow">
@@ -214,7 +215,7 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
                             />
                           </td>
                           <td className="tl-slots">{fmtSlots(acph)}</td>
-                          <td><UsageBar used={used} limit={slotLim} acph={acph} /></td>
+                          <td><UsageBar used={used} limit={slotLim} departureHours={departureHours} /></td>
                         </tr>
                         {expanded && routes.map((r, i) => (
                           <tr key={i} className="tl-subrow">

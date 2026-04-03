@@ -222,7 +222,7 @@ def derive_setup(route_segments: list, airports: list, departure_time_window_ns:
     dep_routes_by_dep: dict = {}
     for seg in dep_segs:
         ff = first_fix(seg)
-        if ff:
+        if ff and ff in airport_ids:
             dep_routes_by_dep.setdefault(ff, [])
             dep_routes_by_dep[ff].append(seg["identifier"].strip())
     for k in dep_routes_by_dep:
