@@ -19,7 +19,7 @@ export function parseSlotGroups(slotGroups, caps = {}) {
     arrs:      caps.arrs      || {},
   };
 
-  (slotGroups || []).forEach(({ id, value }) => {
+  (slotGroups || []).forEach(({ id, value, depAirportId, depRouteId, trackId, arrRouteId, arrAirportId }) => {
     const p = splitSlotId(id); if (!p) return;
     const [dep, depRoute, track, arrRoute, arr] = p;
     if (!deps[dep])           deps[dep]           = { id: dep,      value: 0, cap: C.deps[dep]           ?? null };
@@ -29,7 +29,7 @@ export function parseSlotGroups(slotGroups, caps = {}) {
     if (!arrs[arr])           arrs[arr]            = { id: arr,      value: 0, cap: C.arrs[arr]           ?? null };
     deps[dep].value += value; depRoutes[depRoute].value += value; tracks[track].slots += value;
     arrRoutes[arrRoute].value += value; arrs[arr].value += value;
-    connections.push({ dep, depRoute, track, arrRoute, arr, value });
+    connections.push({ dep, depRoute, track, arrRoute, arr, value, depAirportId, depRouteId, trackId, arrRouteId, arrAirportId });
   });
 
   return {

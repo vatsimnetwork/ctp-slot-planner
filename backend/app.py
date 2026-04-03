@@ -307,7 +307,24 @@ def save_slotgroups():
 
     # Convert identifier-based slot groups from the frontend to ID-based format for storage.
     id_based_groups = []
-    if ident_groups:
+    needs_resolution = []
+    for g in ident_groups:
+        value = int(g.get("value", 0))
+        if value <= 0:
+            continue
+        if all(g.get(k) is not None for k in ("depAirportId", "depRouteId", "trackId", "arrRouteId", "arrAirportId")):
+            id_based_groups.append({
+                "depAirportId": g["depAirportId"],
+                "depRouteId":   g["depRouteId"],
+                "trackId":      g["trackId"],
+                "arrRouteId":   g["arrRouteId"],
+                "arrAirportId": g["arrAirportId"],
+                "value":        value,
+            })
+        else:
+            needs_resolution.append(g)
+
+    if needs_resolution:
         try:
             route_segments = ctp_api.get_route_segments()
             airports       = ctp_api.get_airports()
@@ -316,7 +333,7 @@ def save_slotgroups():
         except requests.ConnectionError:
             return jsonify({"error": "Cannot reach the CTP API"}), 502
         airport_id_by_ident, rs_id_by_ident = _build_id_lookups(route_segments, airports)
-        id_based_groups = _ident_groups_to_id_groups(ident_groups, airport_id_by_ident, rs_id_by_ident)
+        id_based_groups.extend(_ident_groups_to_id_groups(needs_resolution, airport_id_by_ident, rs_id_by_ident))
 
     commentary = json.dumps({
         "slotGroups": id_based_groups,
@@ -804,7 +821,15 @@ def _id_groups_to_ident_groups(slot_groups: list, airport_ident_by_id: dict, rs_
                 file=sys.stderr,
             )
             continue
-        result.append({"id": f"{dep}|{dr}|{track}|{ar}|{arr}", "value": value})
+        result.append({
+            "id":           f"{dep}|{dr}|{track}|{ar}|{arr}",
+            "value":        value,
+            "depAirportId": group.get("depAirportId"),
+            "depRouteId":   group.get("depRouteId"),
+            "trackId":      group.get("trackId"),
+            "arrRouteId":   group.get("arrRouteId"),
+            "arrAirportId": group.get("arrAirportId"),
+        })
     return result
 
 

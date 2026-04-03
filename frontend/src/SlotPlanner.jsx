@@ -112,6 +112,13 @@ export default function SlotPlanner() {
     slotGroups: latestData.current.connections.map(c => ({
       id:    `${c.dep}|${c.depRoute}|${c.track}|${c.arrRoute}|${c.arr}`,
       value: c.value,
+      ...(c.depAirportId != null ? {
+        depAirportId: c.depAirportId,
+        depRouteId:   c.depRouteId,
+        trackId:      c.trackId,
+        arrRouteId:   c.arrRouteId,
+        arrAirportId: c.arrAirportId,
+      } : {}),
     })),
     ...extras,
   }), []);
@@ -279,7 +286,15 @@ export default function SlotPlanner() {
     setIsDirty(true);
     const dc = setupData.defaultCaps || {};
     setData(prev => {
-      const newConns = [...prev.connections,{dep,depRoute,track,arrRoute,arr,value}];
+      const dbIds = setupData.dbIds || {};
+      const newConns = [...prev.connections,{
+        dep, depRoute, track, arrRoute, arr, value,
+        depAirportId:  dbIds.airports?.[dep]         ?? null,
+        depRouteId:    dbIds.routeSegments?.[depRoute] ?? null,
+        trackId:       dbIds.routeSegments?.[track]    ?? null,
+        arrRouteId:    dbIds.routeSegments?.[arrRoute] ?? null,
+        arrAirportId:  dbIds.airports?.[arr]           ?? null,
+      }];
       const ensureDep = prev.deps.some(d=>d.id===dep)?prev.deps:[...prev.deps,{id:dep,value:0,cap:dc.deps?.[dep]??null}];
       const ensureDR  = prev.depRoutes.some(r=>r.id===depRoute)?prev.depRoutes:[...prev.depRoutes,{id:depRoute,value:0,cap:dc.depRoutes?.[depRoute]??null,selected:true}];
       const ensureTr  = prev.tracks.some(t=>t.id===track)?prev.tracks:[...prev.tracks,{id:track,col:TRACK_COLS[prev.tracks.length%TRACK_COLS.length],slots:0,cap:dc.tracks?.[track]??null}];
