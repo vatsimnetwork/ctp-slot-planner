@@ -34,25 +34,21 @@ export default function CityPairTotalsPage({ data, setupData }) {
 
   const depSums = useMemo(() => {
     const sums = {};
-    for (const dep of deps) {
-      sums[dep] = arrAirports.reduce((acc, arr) => {
-        const key = `${dep}|${arr}`;
-        return reachablePairs.has(key) ? acc + (pairTotals[key] || 0) : acc;
-      }, 0);
+    for (const [key, val] of Object.entries(pairTotals)) {
+      const dep = key.split('|')[0];
+      sums[dep] = (sums[dep] || 0) + val;
     }
     return sums;
-  }, [deps, arrAirports, pairTotals, reachablePairs]);
+  }, [pairTotals]);
 
   const arrSums = useMemo(() => {
     const sums = {};
-    for (const arr of arrAirports) {
-      sums[arr] = deps.reduce((acc, dep) => {
-        const key = `${dep}|${arr}`;
-        return reachablePairs.has(key) ? acc + (pairTotals[key] || 0) : acc;
-      }, 0);
+    for (const [key, val] of Object.entries(pairTotals)) {
+      const arr = key.split('|')[1];
+      sums[arr] = (sums[arr] || 0) + val;
     }
     return sums;
-  }, [deps, arrAirports, pairTotals, reachablePairs]);
+  }, [pairTotals]);
 
   const grandTotal = useMemo(() => Object.values(pairTotals).reduce((a, b) => a + b, 0), [pairTotals]);
 
