@@ -6,12 +6,14 @@ function UsageBar({ used, limit, departureHours }) {
   const pct    = Math.round((used / limit) * 100);
   const barPct = Math.min(100, pct);
   const over   = used > limit;
-  const needed = over ? Math.ceil(used / departureHours) : null;
+  const acph   = Math.round(used / departureHours);
+  const diff   = used - limit;
+  const diffStr = (diff >= 0 ? '+' : '') + diff;
   return (
     <div className="tl-usage-bar__wrap">
       <div className="tl-usage-bar" style={{ '--pct': `${barPct}%`, '--bar-color': over ? 'var(--danger)' : pct > 80 ? 'var(--warning)' : 'var(--accent)' }} />
       <span className={`tl-usage-val${over ? ' tl-usage-val--over' : ''}`}>
-        {used} / {limit} ({pct}%){needed != null ? ` — needs ${needed}/hr` : ''}
+        {pct}% - {acph}/hr ({used}: {diffStr})
       </span>
     </div>
   );
