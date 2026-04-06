@@ -252,7 +252,14 @@ export default function SlotPlanner() {
     hasEdits.current = true;
     setIsDirty(true);
     setData(prev => {
-      const newConns = prev.connections.map(c => c === conn ? { ...c, [field]: val } : c);
+      const dbIds = setupData.dbIds || {};
+      const idUpdates = {};
+      if (field === 'dep')      idUpdates.depAirportId = dbIds.airports?.[val]      ?? null;
+      if (field === 'depRoute') idUpdates.depRouteId   = dbIds.routeSegments?.[val] ?? null;
+      if (field === 'track')    idUpdates.trackId      = dbIds.routeSegments?.[val] ?? null;
+      if (field === 'arrRoute') idUpdates.arrRouteId   = dbIds.routeSegments?.[val] ?? null;
+      if (field === 'arr')      idUpdates.arrAirportId = dbIds.airports?.[val]      ?? null;
+      const newConns = prev.connections.map(c => c === conn ? { ...c, [field]: val, ...idUpdates } : c);
       return recomputeAggregates(prev, newConns);
     });
   };
@@ -568,7 +575,7 @@ export default function SlotPlanner() {
                     {ddDepRoutes(selectedDep).map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                   <select disabled={!isStaff} value={c.track} onChange={e=>editConn(c,'track',e.target.value)}>{ddTracks(c.depRoute).map(t=><option key={t} value={t}>{t}</option>)}</select>
-                  <select disabled={!isStaff} value={c.arrRoute} onChange={e=>{const ar=e.target.value;const a=autoArr(ar);hasEdits.current=true;setIsDirty(true);setData(prev=>{const newConns=prev.connections.map(x=>x===c?{...x,arrRoute:ar,...(a?{arr:a}:{})}:x);return recomputeAggregates(prev,newConns);});}}>{ddArrRoutes(c.track).map(r=><option key={r} value={r}>{r}</option>)}</select>
+                  <select disabled={!isStaff} value={c.arrRoute} onChange={e=>{const ar=e.target.value;const a=autoArr(ar);hasEdits.current=true;setIsDirty(true);setData(prev=>{const dbIds=setupData.dbIds||{};const newConns=prev.connections.map(x=>x===c?{...x,arrRoute:ar,arrRouteId:dbIds.routeSegments?.[ar]??null,...(a?{arr:a,arrAirportId:dbIds.airports?.[a]??null}:{})}:x);return recomputeAggregates(prev,newConns);});}}>{ddArrRoutes(c.track).map(r=><option key={r} value={r}>{r}</option>)}</select>
                   <select disabled={!isStaff || !!autoArr(c.arrRoute)} value={c.arr} onChange={e=>editConn(c,'arr',e.target.value)}>
                     <option value={c.arr}>{c.arr}</option>
                     {!autoArr(c.arrRoute) && [...new Set([...setupData.arrs,...arrs.map(a=>a.id)])].sort().filter(a=>a!==c.arr).map(a=><option key={a} value={a}>{a}</option>)}
