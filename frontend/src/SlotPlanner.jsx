@@ -440,8 +440,12 @@ export default function SlotPlanner() {
     const rects=Array.from(gridRef.current.querySelectorAll('.col')).map(c=>{const r=c.getBoundingClientRect();return{left:r.left-cr.left,right:r.right-cr.left};});
     const totalWidth=cr.width;
     if(rects.length<5) return;
+    const cols=Array.from(gridRef.current.querySelectorAll('.col'));
+    const cellCenters=col=>Array.from(col?.querySelectorAll('.planner__cell')??[]).map(el=>{const r=el.getBoundingClientRect();return r.top-cr.top+r.height/2;});
+    const depCenterYs=cellCenters(cols[0]);
     const trackCells=Array.from(gridRef.current.querySelectorAll('.planner__cell--track'));
     const trackCenterYs=trackCells.map(el=>{const r=el.getBoundingClientRect();return r.top-cr.top+r.height/2;});
+    const arrCenterYs=cellCenters(cols[4]);
     const svgH=Math.max(totalH,cr.height);
     const svg=d3.select(svgRef.current); svg.selectAll('*').remove(); svg.attr('width',totalWidth).attr('height',svgH);
     const band=(x1,y1,x2,y2,col,alpha,bw)=>{
@@ -456,11 +460,13 @@ export default function SlotPlanner() {
       if(di<0||dri<0||ti<0||ari<0||ai<0) return; const trk=oTr[ti]; if(!trk) return;
       const hi=!selectedDep||selectedDep===conn.dep; const ds=depRoutes.find(r=>r.id===conn.depRoute)?.selected; const as=arrRoutes.find(r=>r.id===conn.arrRoute)?.selected;
       const alpha=hi?(ds&&as?0.65:0.08):0.03; const bw=thick(conn.value);
+      const dcy=depCenterYs[di]??itemY(di,vDeps.length);
       const tcy=trackCenterYs[ti]??itemY(ti,oTr.length);
-      band(rects[0].right,itemY(di,vDeps.length),rects[1].left,itemY(dri,oDR.length),trk.col,alpha,bw);
+      const acy=arrCenterYs[ai]??itemY(ai,oArrs.length);
+      band(rects[0].right,dcy,rects[1].left,itemY(dri,oDR.length),trk.col,alpha,bw);
       band(rects[1].right,itemY(dri,oDR.length),rects[2].left,tcy,trk.col,alpha,bw);
       band(rects[2].right,tcy,rects[3].left,itemY(ari,oAR.length),trk.col,alpha,bw);
-      band(rects[3].right,itemY(ari,oAR.length),rects[4].left,itemY(ai,oArrs.length),trk.col,alpha,bw);
+      band(rects[3].right,itemY(ari,oAR.length),rects[4].left,acy,trk.col,alpha,bw);
     });
   }, [data, colPositions, selectedDep, searchTerm, gridVisibility]); // colPositions kept so resize triggers redraw
 
@@ -750,7 +756,7 @@ export default function SlotPlanner() {
         <div className="col planner__col">
           <div className="planner__header">Departure</div>
           {vDeps.map(dep => { const isSel=selectedDep===dep.id; const dData=deps.find(d=>d.id===dep.id); return (
-            <div key={dep.id} className={`planner__cell planner__cell--dep${isSel?' planner__cell--selected':''}${!isSel&&selectedDep?' planner__cell--dimmed':''}`} style={{height:maxRows*ROW_H/vDeps.length}} onClick={e=>{e.stopPropagation();setSelectedDep(isSel?null:dep.id);}}>
+            <div key={dep.id} className={`planner__cell planner__cell--dep${isSel?' planner__cell--selected':''}${!isSel&&selectedDep?' planner__cell--dimmed':''}`} style={{minHeight:maxRows*ROW_H/vDeps.length}} onClick={e=>{e.stopPropagation();setSelectedDep(isSel?null:dep.id);}}>
               <div className="planner__cell-dep-info">
                 <span className="planner__cell-name">{dep.id}</span>
                 <TimeSpinner value={depTimes[dep.id] || ''} onChange={v => handleDepTimeChange(dep.id, v)} style={!isStaff?{pointerEvents:'none',opacity:.5}:{fontSize:'0.75rem'}}/>
@@ -813,7 +819,7 @@ export default function SlotPlanner() {
         <div className="col planner__col">
           <div className="planner__header planner__header--right">Arrival</div>
           {oArrs.map(arr => { const ac=selectedDep?selConnsAll.filter(c=>c.arr===arr.id):[]; const active=!selectedDep||filteredConns.some(c=>c.dep===selectedDep&&c.arr===arr.id); const aData=arrs.find(a=>a.id===arr.id); return (
-            <div key={arr.id} className="planner__cell planner__cell--right" style={{height:maxRows*ROW_H/oArrs.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
+            <div key={arr.id} className="planner__cell planner__cell--right" style={{minHeight:maxRows*ROW_H/oArrs.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
               <QuantityLabel used={aData?.value??0} cap={aData?.cap} size="lg"/>
               {selectedDep&&ac.map(c=><span key={`${c.track}-${c.depRoute}`} className="planner__conn-label" style={{background:trackCol(c.track)}}>{connLabel(c)}</span>)}
               <div className="planner__cell-arr-info">
