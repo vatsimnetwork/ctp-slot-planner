@@ -216,11 +216,12 @@ export default function SlotPlanner() {
     const existingArrIds = new Set(vArrs.map(a      => a.id));
     const match = (id) => !term || id.toLowerCase().includes(term);
     const allDRIds  = [...new Set(Object.values(setupData.depRoutesByDep).flat())];
+    const arrAirports = [...new Set(Object.values(setupData.arrByArrRoute))];
     vDepRoutes = [...vDepRoutes, ...allDRIds.filter(id => !existingDRIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.depRoutes?.[id] ?? null }))];
     vTracks    = [...vTracks,    ...setupData.tracks.filter(id => !existingTrIds.has(id) && match(id)).map(id => ({ id, col: '#2A3B90', slots: 0, cap: setupData.defaultCaps.tracks?.[id] ?? null }))];
     vArrRoutes = [...vArrRoutes, ...setupData.arrRoutes.filter(id => !existingARIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.arrRoutes?.[id] ?? null }))];
     vDeps      = [...vDeps,      ...setupData.deps.filter(id => !existingDepIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.deps?.[id] ?? null }))];
-    vArrs      = [...vArrs,      ...setupData.arrs.filter(id => !existingArrIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.arrs?.[id] ?? null }))];
+    vArrs      = [...vArrs,      ...arrAirports.filter(id => !existingArrIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.arrs?.[id] ?? null }))];
     if (gridVisibility === 'all') {
       // Also add disabled routes
       const mk = (r) => ({ id: r.identifier, value: 0, cap: null, slots: 0, disabled: true });
