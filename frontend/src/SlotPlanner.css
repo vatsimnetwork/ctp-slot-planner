@@ -179,7 +179,7 @@
 .planner__cell--dep:hover { background:var(--bg-hover); }
 .planner__cell--selected { background:var(--bg-selected) !important; }
 .planner__cell--dimmed { opacity:.2; }
-.planner__cell--track { flex-direction:column; justify-content:center; gap:3px; overflow:hidden; }
+.planner__cell--track { flex-direction:column; justify-content:center; gap:3px; overflow:hidden; padding-top:0; padding-bottom:0; }
 .planner__track-main { display:flex; flex-direction:column; align-items:center; gap:2px; }
 .planner__label-cluster--compact { justify-content:center; margin-top:1px; }
 .planner__cell--right { justify-content:flex-end; gap:8px; }

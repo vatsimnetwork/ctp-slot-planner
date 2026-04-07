@@ -107,6 +107,12 @@ export default function SlotPlanner() {
 
   useEffect(() => { if (selectedDep) setNewRoute(p => ({...p, dep:selectedDep, depRoute:''})); }, [selectedDep]);
 
+  useEffect(() => {
+    const onKeyDown = e => { if (e.key === 'Escape') { setSelectedDep(null); setShowLimitModal(false); } };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const { deps, depRoutes, tracks, arrRoutes, arrs, connections } = data;
 
   // ── Save ──────────────────────────────────────────────────────────────────
@@ -503,7 +509,7 @@ export default function SlotPlanner() {
       {showModal && <SimParamsModal mode={pendingMode} params={simParams} onParamsChange={setSimParams} onConfirm={confirmSubmit} onClose={()=>setShowModal(false)}/>}
 
       {showLimitModal && (
-        <div className="modal-overlay" onClick={()=>setShowLimitModal(false)}>
+        <div className="modal-overlay" onClick={e=>{e.stopPropagation();setShowLimitModal(false);}}>
           <div className="modal-box modal-box--limit-warning" onClick={e=>e.stopPropagation()}>
             <div className="modal-header modal-header--danger">
               <span className="modal-title">⚠ Throughput Limits Exceeded</span>
@@ -562,7 +568,7 @@ export default function SlotPlanner() {
           {simStatus === 'saved'         && <span className="planner__sim-status planner__sim-status--done">Finalizing…</span>}
           {!isStaff && <span className="planner__readonly-badge">Read-only</span>}
           {limitViolations.length > 0 && (
-            <button className="planner__limit-alert" onClick={()=>setShowLimitModal(true)}>
+            <button className="planner__limit-alert" onClick={e=>{e.stopPropagation();setShowLimitModal(true);}}>
               ⚠ {limitViolations.length} limit{limitViolations.length > 1 ? 's' : ''} exceeded
             </button>
           )}
