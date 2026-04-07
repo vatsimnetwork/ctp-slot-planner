@@ -215,22 +215,38 @@ export default function SlotPlanner() {
     const existingDepIds = new Set(vDeps.map(d      => d.id));
     const existingArrIds = new Set(vArrs.map(a      => a.id));
     const match = (id) => !term || id.toLowerCase().includes(term);
-    const allDRIds  = [...new Set(Object.values(setupData.depRoutesByDep).flat())];
-    const arrAirports = [...new Set(Object.values(setupData.arrByArrRoute))];
-    vDepRoutes = [...vDepRoutes, ...allDRIds.filter(id => !existingDRIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.depRoutes?.[id] ?? null }))];
+    // For dep routes: only include routes from airports that match, or routes whose own identifier matches.
+    // Using all airports' routes with just an identifier check would include routes from unrelated airports.
+    const matchingDepAirports = new Set(setupData.deps.filter(dep => match(dep)));
+    const allDRIds = [...new Set([
+      ...Object.entries(setupData.depRoutesByDep).flatMap(([dep, ids]) => matchingDepAirports.has(dep) ? ids : []),
+      ...Object.values(setupData.depRoutesByDep).flat().filter(id => match(id)),
+    ])];
+    const arrAirportList = [...new Set(Object.values(setupData.arrByArrRoute))];
+    const matchingArrAirports = new Set(arrAirportList.filter(a => match(a)));
+    const arrRoutesByArrAirport = {};
+    Object.entries(setupData.arrByArrRoute).forEach(([rId, arr]) => { (arrRoutesByArrAirport[arr] = arrRoutesByArrAirport[arr] || []).push(rId); });
+    const allARIds = [...new Set([
+      ...Object.entries(arrRoutesByArrAirport).flatMap(([arr]) => matchingArrAirports.has(arr) ? (arrRoutesByArrAirport[arr] || []) : []),
+      ...setupData.arrRoutes.filter(id => match(id)),
+    ])];
+    vDepRoutes = [...vDepRoutes, ...allDRIds.filter(id => !existingDRIds.has(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.depRoutes?.[id] ?? null }))];
     vTracks    = [...vTracks,    ...setupData.tracks.filter(id => !existingTrIds.has(id) && match(id)).map(id => ({ id, col: '#2A3B90', slots: 0, cap: setupData.defaultCaps.tracks?.[id] ?? null }))];
-    vArrRoutes = [...vArrRoutes, ...setupData.arrRoutes.filter(id => !existingARIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.arrRoutes?.[id] ?? null }))];
+    vArrRoutes = [...vArrRoutes, ...allARIds.filter(id => !existingARIds.has(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.arrRoutes?.[id] ?? null }))];
     vDeps      = [...vDeps,      ...setupData.deps.filter(id => !existingDepIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.deps?.[id] ?? null }))];
-    vArrs      = [...vArrs,      ...arrAirports.filter(id => !existingArrIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.arrs?.[id] ?? null }))];
+    vArrs      = [...vArrs,      ...arrAirportList.filter(id => !existingArrIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.arrs?.[id] ?? null }))];
     if (gridVisibility === 'all') {
-      // Also add disabled routes
+      // Also add disabled routes — rebuild sets after enabled-empties were appended
+      const afterDRIds  = new Set(vDepRoutes.map(r => r.id));
+      const afterTrIds  = new Set(vTracks.map(t   => t.id));
+      const afterARIds  = new Set(vArrRoutes.map(r => r.id));
       const mk = (r) => ({ id: r.identifier, value: 0, cap: null, slots: 0, disabled: true });
-      const dis = (type) => setupData.routeList
-        .filter(r => !r.enabled && r.type === type && match(r.identifier))
+      const dis = (type, existing) => setupData.routeList
+        .filter(r => !r.enabled && r.type === type && match(r.identifier) && !existing.has(r.identifier))
         .map(mk);
-      vDepRoutes = [...vDepRoutes, ...dis('dep')];
-      vTracks    = [...vTracks,    ...dis('track')];
-      vArrRoutes = [...vArrRoutes, ...dis('arr')];
+      vDepRoutes = [...vDepRoutes, ...dis('dep',   afterDRIds)];
+      vTracks    = [...vTracks,    ...dis('track', afterTrIds)];
+      vArrRoutes = [...vArrRoutes, ...dis('arr',   afterARIds)];
     }
   }
 
@@ -411,8 +427,11 @@ export default function SlotPlanner() {
 
   // ── D3 Sankey ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!svgRef.current||!colPositions) return;
-    const {rects,totalWidth}=colPositions; if(rects.length<5) return;
+    if (!svgRef.current||!gridRef.current) return;
+    const cr=gridRef.current.getBoundingClientRect();
+    const rects=Array.from(gridRef.current.querySelectorAll('.col')).map(c=>{const r=c.getBoundingClientRect();return{left:r.left-cr.left,right:r.right-cr.left};});
+    const totalWidth=cr.width;
+    if(rects.length<5) return;
     const svg=d3.select(svgRef.current); svg.selectAll('*').remove(); svg.attr('width',totalWidth).attr('height',totalH);
     const band=(x1,y1,x2,y2,col,alpha,bw)=>{
       const mx=(x1+x2)/2;
@@ -431,7 +450,7 @@ export default function SlotPlanner() {
       band(rects[2].right,itemY(ti,oTr.length),rects[3].left,itemY(ari,oAR.length),trk.col,alpha,bw);
       band(rects[3].right,itemY(ari,oAR.length),rects[4].left,itemY(ai,oArrs.length),trk.col,alpha,bw);
     });
-  }, [data, colPositions, selectedDep, searchTerm, gridVisibility]);
+  }, [data, colPositions, selectedDep, searchTerm, gridVisibility]); // colPositions kept so resize triggers redraw
 
   const liveSlots = {}; connections.forEach(c=>{liveSlots[c.track]=(liveSlots[c.track]||0)+c.value;});
   const liveRouteSlots = {};
