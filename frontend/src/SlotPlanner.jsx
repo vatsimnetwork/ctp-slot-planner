@@ -440,7 +440,10 @@ export default function SlotPlanner() {
     const rects=Array.from(gridRef.current.querySelectorAll('.col')).map(c=>{const r=c.getBoundingClientRect();return{left:r.left-cr.left,right:r.right-cr.left};});
     const totalWidth=cr.width;
     if(rects.length<5) return;
-    const svg=d3.select(svgRef.current); svg.selectAll('*').remove(); svg.attr('width',totalWidth).attr('height',totalH);
+    const trackCells=Array.from(gridRef.current.querySelectorAll('.planner__cell--track'));
+    const trackCenterYs=trackCells.map(el=>{const r=el.getBoundingClientRect();return r.top-cr.top+r.height/2;});
+    const svgH=Math.max(totalH,cr.height);
+    const svg=d3.select(svgRef.current); svg.selectAll('*').remove(); svg.attr('width',totalWidth).attr('height',svgH);
     const band=(x1,y1,x2,y2,col,alpha,bw)=>{
       const mx=(x1+x2)/2;
       const d=Math.abs(y1-y2)<1?`M ${x1} ${y1-bw/2} L ${x2} ${y2-bw/2} L ${x2} ${y2+bw/2} L ${x1} ${y1+bw/2} Z`:`M ${x1} ${y1-bw/2} C ${mx} ${y1-bw/2},${mx} ${y2-bw/2},${x2} ${y2-bw/2} L ${x2} ${y2+bw/2} C ${mx} ${y2+bw/2},${mx} ${y1+bw/2},${x1} ${y1+bw/2} Z`;
@@ -453,9 +456,10 @@ export default function SlotPlanner() {
       if(di<0||dri<0||ti<0||ari<0||ai<0) return; const trk=oTr[ti]; if(!trk) return;
       const hi=!selectedDep||selectedDep===conn.dep; const ds=depRoutes.find(r=>r.id===conn.depRoute)?.selected; const as=arrRoutes.find(r=>r.id===conn.arrRoute)?.selected;
       const alpha=hi?(ds&&as?0.65:0.08):0.03; const bw=thick(conn.value);
+      const tcy=trackCenterYs[ti]??itemY(ti,oTr.length);
       band(rects[0].right,itemY(di,vDeps.length),rects[1].left,itemY(dri,oDR.length),trk.col,alpha,bw);
-      band(rects[1].right,itemY(dri,oDR.length),rects[2].left,itemY(ti,oTr.length),trk.col,alpha,bw);
-      band(rects[2].right,itemY(ti,oTr.length),rects[3].left,itemY(ari,oAR.length),trk.col,alpha,bw);
+      band(rects[1].right,itemY(dri,oDR.length),rects[2].left,tcy,trk.col,alpha,bw);
+      band(rects[2].right,tcy,rects[3].left,itemY(ari,oAR.length),trk.col,alpha,bw);
       band(rects[3].right,itemY(ari,oAR.length),rects[4].left,itemY(ai,oArrs.length),trk.col,alpha,bw);
     });
   }, [data, colPositions, selectedDep, searchTerm, gridVisibility]); // colPositions kept so resize triggers redraw
@@ -777,7 +781,7 @@ export default function SlotPlanner() {
         <div className="col planner__col">
           <div className="planner__header planner__header--center">Track</div>
           {oTr.map(track => { const tc=selectedDep?selConnsAll.filter(c=>c.track===track.id):[]; const active=!selectedDep||filteredConns.some(c=>c.dep===selectedDep&&c.track===track.id); return (
-            <div key={track.id} className={`planner__cell planner__cell--track${track.disabled?' planner__cell--disabled':''}`} style={{height:maxRows*ROW_H/oTr.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
+            <div key={track.id} className={`planner__cell planner__cell--track${track.disabled?' planner__cell--disabled':''}`} style={{minHeight:maxRows*ROW_H/oTr.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
               <div className="planner__track-main">
                 <span style={{fontWeight:700,fontSize:26,color:track.disabled?'var(--text-muted)':track.col,lineHeight:1}}>{track.id}{track.disabled&&<span className="planner__route-disabled-badge"> disabled</span>}</span>
                 <QuantityLabel used={liveSlots[track.id]||0} cap={track.cap} size="lg"/>
