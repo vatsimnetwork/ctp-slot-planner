@@ -98,7 +98,9 @@ def _to_api_datetime(spinner_val: str, event_date_str: str) -> str | None:
 @app.get("/setup/")
 def setup():
     user = auth.validate_session(request)
-    is_staff = bool(WRITE_ROLES.intersection(user.get("roles", [])))
+    roles = user.get("roles", [])
+    is_staff = bool(WRITE_ROLES.intersection(roles))
+    is_route_staff = bool(ROUTE_ROLES.intersection(roles)) or is_staff
     try:
         route_segments = ctp_api.get_route_segments()
         airports = ctp_api.get_airports()
@@ -224,6 +226,7 @@ def setup():
         **derived,
         "routesRevision": routes_revision,
         "isStaff": is_staff,
+        "isRouteStaff": is_route_staff,
         "syncTime": _from_api_time(event.get("departureTimeWindowOffsetSynchronizationTimeOfDay", "16:00:00")) if event else "1600z",
         "tagMap": tag_map,
         "sectorMap": sector_map,

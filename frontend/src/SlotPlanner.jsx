@@ -35,6 +35,7 @@ export default function SlotPlanner() {
   const [pendingMode, setPendingMode] = useState(null);
   const [toasts,      setToasts]      = useState([]);
   const [isStaff,     setIsStaff]     = useState(false);
+  const [isRouteStaff, setIsRouteStaff] = useState(false);
   const [limitViolations, setLimitViolations] = useState([]);
   const [showLimitModal,  setShowLimitModal]  = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -86,6 +87,7 @@ export default function SlotPlanner() {
         routeList:        setup.routeList||[],
       });
       setIsStaff(setup.isStaff ?? false);
+      setIsRouteStaff(setup.isRouteStaff ?? false);
       if (setup.eventId)  eventIdRef.current = setup.eventId;
       setSimParams(p => ({ ...p, DepartureTimeWindowOffsetSynchronizationTimeOfDay: setup.syncTime || p.DepartureTimeWindowOffsetSynchronizationTimeOfDay }));
       if (setup.depTimes) setDepTimes(setup.depTimes);
@@ -592,7 +594,7 @@ export default function SlotPlanner() {
         </div>
       </div>
 
-      {activeTab === 'throughputLimits' && <ThroughputLimitsPage isStaff={isStaff} addToast={addToast} tagUsage={liveTagUsage} sectorUsage={liveSectorUsage} departureHours={setupData.departureHours} tagToRoutes={setupData.tagToRoutes} sectorToRoutes={setupData.sectorToRoutes} routeSlots={liveRouteSlots} routeList={setupData.routeList}/>}
+      {activeTab === 'throughputLimits' && <ThroughputLimitsPage isStaff={isRouteStaff} addToast={addToast} tagUsage={liveTagUsage} sectorUsage={liveSectorUsage} departureHours={setupData.departureHours} tagToRoutes={setupData.tagToRoutes} sectorToRoutes={setupData.sectorToRoutes} routeSlots={liveRouteSlots} routeList={setupData.routeList}/>}
 
       {activeTab === 'cityPairTotals' && <CityPairTotalsPage data={data} setupData={setupData}/>}
 
