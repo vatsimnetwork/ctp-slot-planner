@@ -35,9 +35,15 @@ def _ext_error(e: requests.HTTPError):
 
 WRITE_ROLES = {"slot_staff", "developer", "administrator"}
 
+ROUTE_ROLES = {"route_staff"}
+
 
 def _require_staff(user: dict):
     if not WRITE_ROLES.intersection(user.get("roles", [])):
+        abort(403, description="insufficient role")
+
+def _require_routes(user: dict):
+    if not ROUTE_ROLES.intersection(user.get("roles", [])) and not WRITE_ROLES.intersection(user.get("roles", [])):
         abort(403, description="insufficient role")
 
 
@@ -589,7 +595,7 @@ def update_sync_time():
 @app.post("/caps/")
 def update_cap():
     user = auth.validate_session(request)
-    _require_staff(user)
+    _require_routes(user)
     body = request.get_json(force=True)
     entity_type = body.get("type")   # "airport" | "routeSegment"
     entity_id   = body.get("id")     # DB id (integer)
@@ -665,7 +671,7 @@ def get_throughput_limits():
 @app.post("/throughput-limits/")
 def save_throughput_limits():
     user = auth.validate_session(request)
-    _require_staff(user)
+    _require_routes(user)
     body = request.get_json(force=True)
     tag_limits = body.get("tagLimits", [])
     sector_updates = body.get("sectors", [])
