@@ -147,12 +147,23 @@
 }
 
 /* ── Search ── */
-.search-container { position:relative; display:inline-flex; align-items:center; }
+.search-container { display:inline-flex; align-items:center; gap:0; }
+.search-input-wrap { position:relative; display:inline-flex; align-items:center; }
 .search-input { font-family:inherit; font-size:14px; color:var(--text); background:var(--bg-card); border:1.5px solid var(--border); border-radius:6px; padding:6px 30px 6px 10px; width:280px; outline:none; transition:border-color .14s,box-shadow .14s; }
 .search-input:focus { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-subtle); }
 .search-input::placeholder { color:var(--text-muted); }
 .search-clear { position:absolute; right:7px; background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:12px; padding:2px 4px; border-radius:3px; transition:color .12s,background .12s; }
 .search-clear:hover { color:var(--text); background:var(--bg-hover); }
+.planner__visibility-filter { margin-left:8px; font-family:inherit; font-size:13px; color:var(--text); background:var(--bg-card); border:1.5px solid var(--border); border-radius:6px; padding:5px 8px; cursor:pointer; outline:none; }
+.planner__visibility-filter:focus { border-color:var(--accent); }
+
+/* ── Disabled route indicators (All visibility mode) ── */
+.planner__route-row--disabled { opacity:0.45; }
+.planner__cell--disabled { opacity:0.45; }
+.planner__route-disabled-badge { font-size:10px; font-weight:500; color:var(--text-muted); background:var(--bg-hover); border-radius:3px; padding:1px 4px; margin-left:4px; letter-spacing:.03em; text-transform:uppercase; }
+
+/* ── Disabled-routes note in limit-warning modal ── */
+.limit-warning__disabled-note { margin-top:12px; padding:8px 12px; border-radius:6px; background:var(--bg-hover); border:1px solid var(--border); font-size:13px; color:var(--text-secondary); line-height:1.5; }
 
 /* ── Sankey grid ── */
 .planner__grid { display:flex; justify-content:space-between; align-items:flex-start; width:100%; position:relative; padding:24px; gap:0; }

@@ -20,14 +20,15 @@ export default function SlotPlanner() {
   const [saving,  setSaving]  = useState(false);
   const [simStatus, setSimStatus] = useState(null); // null | 'running' | 'sim_responded' | 'saved'
   const [activeTab, setActiveTab] = useState('planner');
-  const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[], tracksByDepRoute:{}, arrRoutesByTrack:{}, arrByArrRoute:{}, dbIds:{airports:{},routeSegments:{}}, departureHours:3, defaultCaps:{deps:{},depRoutes:{},tracks:{},arrRoutes:{},arrs:{}}, tagMap:{}, sectorMap:{}, tagLimits:[], sectorLimits:[], tagToRoutes:{}, sectorToRoutes:{} });
+  const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[], tracksByDepRoute:{}, arrRoutesByTrack:{}, arrByArrRoute:{}, dbIds:{airports:{},routeSegments:{}}, departureHours:3, defaultCaps:{deps:{},depRoutes:{},tracks:{},arrRoutes:{},arrs:{}}, tagMap:{}, sectorMap:{}, tagLimits:[], sectorLimits:[], tagToRoutes:{}, sectorToRoutes:{}, disabledRoutes:[], routeList:[] });
   const [simVersion,       setSimVersion]       = useState(null);
   const [plannerRevisions, setPlannerRevisions] = useState(0);
   const [selectedDep, setSelectedDep] = useState(null);
   const [depTimes,    setDepTimes]    = useState({});
   const [arrTimes,    setArrTimes]    = useState({});
   const [newRoute,    setNewRoute]    = useState({ dep:'', depRoute:'', track:'', arrRoute:'', arr:'', value:0 });
-  const [searchTerm,  setSearchTerm]  = useState('');
+  const [searchTerm,    setSearchTerm]    = useState('');
+  const [gridVisibility, setGridVisibility] = useState('loaded');
   const [simParams,   setSimParams]   = useState({ ...DEFAULT_SIM_PARAMS });
   const [showModal,   setShowModal]   = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -81,6 +82,8 @@ export default function SlotPlanner() {
         sectorLimits:     setup.sectorLimits||[],
         tagToRoutes:      setup.tagToRoutes||{},
         sectorToRoutes:   setup.sectorToRoutes||{},
+        disabledRoutes:   setup.disabledRoutes||[],
+        routeList:        setup.routeList||[],
       });
       setIsStaff(setup.isStaff ?? false);
       if (setup.eventId)  eventIdRef.current = setup.eventId;
@@ -188,11 +191,47 @@ export default function SlotPlanner() {
   // ── Search filter ─────────────────────────────────────────────────────────
   const term = searchTerm.trim().toLowerCase();
   const filteredConns = term ? connections.filter(c=>[c.dep,c.depRoute,c.track,c.arrRoute,c.arr].some(v=>v.toLowerCase().includes(term))) : connections;
-  const vDeps      = deps.filter(d      => !term || filteredConns.some(c=>c.dep===d.id));
-  const vDepRoutes = depRoutes.filter(r  => !term || filteredConns.some(c=>c.depRoute===r.id));
-  const vTracks    = tracks.filter(t    => !term || filteredConns.some(c=>c.track===t.id));
-  const vArrRoutes = arrRoutes.filter(r  => !term || filteredConns.some(c=>c.arrRoute===r.id));
-  const vArrs      = arrs.filter(a      => !term || filteredConns.some(c=>c.arr===a.id));
+  let vDeps      = deps.filter(d      => !term || filteredConns.some(c=>c.dep===d.id));
+  let vDepRoutes = depRoutes.filter(r  => !term || filteredConns.some(c=>c.depRoute===r.id));
+  let vTracks    = tracks.filter(t    => !term || filteredConns.some(c=>c.track===t.id));
+  let vArrRoutes = arrRoutes.filter(r  => !term || filteredConns.some(c=>c.arrRoute===r.id));
+  let vArrs      = arrs.filter(a      => !term || filteredConns.some(c=>c.arr===a.id));
+
+  // ── Visibility filter ─────────────────────────────────────────────────────
+  if (gridVisibility === 'loaded') {
+    // "With traffic": only rows that have connections — this is the default
+    // (no extra filter needed; parseSlotGroups already only creates entries for routes in connections)
+  } else if (gridVisibility === 'overloaded') {
+    vDeps      = vDeps.filter(d      => d.cap != null && d.value  > d.cap);
+    vDepRoutes = vDepRoutes.filter(r  => r.cap != null && r.value  > r.cap);
+    vTracks    = vTracks.filter(t    => t.cap != null && t.slots  > t.cap);
+    vArrRoutes = vArrRoutes.filter(r  => r.cap != null && r.value  > r.cap);
+    vArrs      = vArrs.filter(a      => a.cap != null && a.value  > a.cap);
+  } else if (gridVisibility === 'active' || gridVisibility === 'all') {
+    // "Enabled" or "All": add 0-traffic entries for every enabled route from setupData
+    const existingDRIds  = new Set(vDepRoutes.map(r => r.id));
+    const existingTrIds  = new Set(vTracks.map(t   => t.id));
+    const existingARIds  = new Set(vArrRoutes.map(r => r.id));
+    const existingDepIds = new Set(vDeps.map(d      => d.id));
+    const existingArrIds = new Set(vArrs.map(a      => a.id));
+    const match = (id) => !term || id.toLowerCase().includes(term);
+    const allDRIds  = [...new Set(Object.values(setupData.depRoutesByDep).flat())];
+    vDepRoutes = [...vDepRoutes, ...allDRIds.filter(id => !existingDRIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.depRoutes?.[id] ?? null }))];
+    vTracks    = [...vTracks,    ...setupData.tracks.filter(id => !existingTrIds.has(id) && match(id)).map(id => ({ id, col: '#2A3B90', slots: 0, cap: setupData.defaultCaps.tracks?.[id] ?? null }))];
+    vArrRoutes = [...vArrRoutes, ...setupData.arrRoutes.filter(id => !existingARIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.arrRoutes?.[id] ?? null }))];
+    vDeps      = [...vDeps,      ...setupData.deps.filter(id => !existingDepIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.deps?.[id] ?? null }))];
+    vArrs      = [...vArrs,      ...setupData.arrs.filter(id => !existingArrIds.has(id) && match(id)).map(id => ({ id, value: 0, cap: setupData.defaultCaps.arrs?.[id] ?? null }))];
+    if (gridVisibility === 'all') {
+      // Also add disabled routes
+      const mk = (r) => ({ id: r.identifier, value: 0, cap: null, slots: 0, disabled: true });
+      const dis = (type) => setupData.routeList
+        .filter(r => !r.enabled && r.type === type && match(r.identifier))
+        .map(mk);
+      vDepRoutes = [...vDepRoutes, ...dis('dep')];
+      vTracks    = [...vTracks,    ...dis('track')];
+      vArrRoutes = [...vArrRoutes, ...dis('arr')];
+    }
+  }
 
   const depOrd = new Map(vDeps.map((d,i)=>[d.id,i]));
   const oDR    = barycentricOrder(vDepRoutes, filteredConns,'depRoute','dep',depOrd);
@@ -366,7 +405,7 @@ export default function SlotPlanner() {
     if (!gridRef.current) return;
     const update = () => { const cr=gridRef.current.getBoundingClientRect(); const rects=Array.from(gridRef.current.querySelectorAll('.col')).map(c=>{const r=c.getBoundingClientRect();return{left:r.left-cr.left,right:r.right-cr.left};}); setColPositions({rects,totalWidth:cr.width}); };
     update(); window.addEventListener('resize',update); return ()=>window.removeEventListener('resize',update);
-  }, [data, searchTerm, activeTab]);
+  }, [data, searchTerm, activeTab, gridVisibility]);
   useLayoutEffect(()=>{ if(editRef.current) setBraceHeight(editRef.current.offsetHeight); }, [selConns.length,selectedDep]);
 
   // ── D3 Sankey ─────────────────────────────────────────────────────────────
@@ -391,7 +430,7 @@ export default function SlotPlanner() {
       band(rects[2].right,itemY(ti,oTr.length),rects[3].left,itemY(ari,oAR.length),trk.col,alpha,bw);
       band(rects[3].right,itemY(ari,oAR.length),rects[4].left,itemY(ai,oArrs.length),trk.col,alpha,bw);
     });
-  }, [data, colPositions, selectedDep, searchTerm]);
+  }, [data, colPositions, selectedDep, searchTerm, gridVisibility]);
 
   const liveSlots = {}; connections.forEach(c=>{liveSlots[c.track]=(liveSlots[c.track]||0)+c.value;});
   const liveRouteSlots = {};
@@ -400,6 +439,9 @@ export default function SlotPlanner() {
     liveRouteSlots[c.track]    = (liveRouteSlots[c.track]    || 0) + c.value;
     liveRouteSlots[c.arrRoute] = (liveRouteSlots[c.arrRoute] || 0) + c.value;
   });
+  const disabledInUse = setupData.disabledRoutes.length > 0
+    ? [...new Set(connections.flatMap(c => [c.depRoute, c.track, c.arrRoute]).filter(r => setupData.disabledRoutes.includes(r)))]
+    : [];
   const liveTagUsage = {};
   const liveSectorUsage = {};
   connections.forEach(c => {
@@ -461,6 +503,11 @@ export default function SlotPlanner() {
                   ))}
                 </tbody>
               </table>
+              {disabledInUse.length > 0 && (
+                <div className="limit-warning__disabled-note">
+                  <strong>Disabled routes in use:</strong> the following routes are disabled but still appear in your plan and may contribute to violations: {disabledInUse.join(', ')}
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="planner__btn planner__btn--destructive" onClick={()=>setShowLimitModal(false)}>I understand — dismiss</button>
@@ -525,7 +572,7 @@ export default function SlotPlanner() {
         </div>
       </div>
 
-      {activeTab === 'throughputLimits' && <ThroughputLimitsPage isStaff={isStaff} addToast={addToast} tagUsage={liveTagUsage} sectorUsage={liveSectorUsage} departureHours={setupData.departureHours} tagToRoutes={setupData.tagToRoutes} sectorToRoutes={setupData.sectorToRoutes} routeSlots={liveRouteSlots}/>}
+      {activeTab === 'throughputLimits' && <ThroughputLimitsPage isStaff={isStaff} addToast={addToast} tagUsage={liveTagUsage} sectorUsage={liveSectorUsage} departureHours={setupData.departureHours} tagToRoutes={setupData.tagToRoutes} sectorToRoutes={setupData.sectorToRoutes} routeSlots={liveRouteSlots} routeList={setupData.routeList}/>}
 
       {activeTab === 'cityPairTotals' && <CityPairTotalsPage data={data} setupData={setupData}/>}
 
@@ -538,8 +585,16 @@ export default function SlotPlanner() {
         </div>
 
         <div className="search-container">
-          <input type="text" placeholder="Search by dep, route, track, or arrival…" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="search-input"/>
-          {searchTerm && <button className="search-clear" onClick={()=>setSearchTerm('')}>✕</button>}
+          <div className="search-input-wrap">
+            <input type="text" placeholder="Search by dep, route, track, or arrival…" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="search-input"/>
+            {searchTerm && <button className="search-clear" onClick={()=>setSearchTerm('')}>✕</button>}
+          </div>
+          <select className="planner__visibility-filter" value={gridVisibility} onChange={e=>setGridVisibility(e.target.value)}>
+            <option value="all">All (incl. disabled)</option>
+            <option value="active">Enabled</option>
+            <option value="loaded">With traffic (default)</option>
+            <option value="overloaded">Over capacity</option>
+          </select>
         </div>
         <div className="planner__control-add">
           <select disabled={!isStaff} value={newRoute.dep} onChange={e=>setNewRoute(r=>({...r,dep:e.target.value,depRoute:'',track:'',arrRoute:'',arr:''}))}>
@@ -680,8 +735,8 @@ export default function SlotPlanner() {
         <div className="col planner__col planner__col--route">
           <div className="planner__header planner__header--center">Route</div>
           {oDR.map(route => { const rc=selectedDep?selConnsAll.filter(c=>c.depRoute===route.id):[]; const opacity=!selectedDep?1:(rc.length>0?1:0.35); return (
-            <div key={route.id} className="planner__route-row" style={{height:maxRows*ROW_H/oDR.length,opacity}} onClick={e=>e.stopPropagation()}>
-              <span className="planner__route-name">{route.id}</span>
+            <div key={route.id} className={`planner__route-row${route.disabled?' planner__route-row--disabled':''}`} style={{height:maxRows*ROW_H/oDR.length,opacity}} onClick={e=>e.stopPropagation()}>
+              <span className="planner__route-name">{route.id}{route.disabled&&<span className="planner__route-disabled-badge"> disabled</span>}</span>
               <div className="planner__route-right">
                 {rc.map(c=><span key={`${c.track}-${c.arrRoute}`} className={`planner__conn-label${isStaff?' planner__conn-label--rm':''}`} style={{background:trackCol(c.track)}} onClick={e=>{if(!isStaff)return;e.stopPropagation();removeConnection(c);}}>{connLabel(c)}</span>)}
                 <QuantityLabel used={route.value} cap={route.cap} size="md"/>
@@ -694,9 +749,9 @@ export default function SlotPlanner() {
         <div className="col planner__col">
           <div className="planner__header planner__header--center">Track</div>
           {oTr.map(track => { const tc=selectedDep?selConnsAll.filter(c=>c.track===track.id):[]; const active=!selectedDep||filteredConns.some(c=>c.dep===selectedDep&&c.track===track.id); return (
-            <div key={track.id} className="planner__cell planner__cell--track" style={{height:maxRows*ROW_H/oTr.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
+            <div key={track.id} className={`planner__cell planner__cell--track${track.disabled?' planner__cell--disabled':''}`} style={{height:maxRows*ROW_H/oTr.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
               <div className="planner__track-main">
-                <span style={{fontWeight:700,fontSize:26,color:track.col,lineHeight:1}}>{track.id}</span>
+                <span style={{fontWeight:700,fontSize:26,color:track.disabled?'var(--text-muted)':track.col,lineHeight:1}}>{track.id}{track.disabled&&<span className="planner__route-disabled-badge"> disabled</span>}</span>
                 <QuantityLabel used={liveSlots[track.id]||0} cap={track.cap} size="lg"/>
               </div>
               {selectedDep&&tc.length>0&&(
@@ -712,8 +767,8 @@ export default function SlotPlanner() {
         <div className="col planner__col planner__col--route">
           <div className="planner__header planner__header--center">Route</div>
           {oAR.map(route => { const rc=selectedDep?selConnsAll.filter(c=>c.arrRoute===route.id):[]; const active=!selectedDep||filteredConns.some(c=>c.dep===selectedDep&&c.arrRoute===route.id); return (
-            <div key={route.id} className="planner__route-row" style={{height:maxRows*ROW_H/oAR.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
-              <span className="planner__route-name">{route.id}</span>
+            <div key={route.id} className={`planner__route-row${route.disabled?' planner__route-row--disabled':''}`} style={{height:maxRows*ROW_H/oAR.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
+              <span className="planner__route-name">{route.id}{route.disabled&&<span className="planner__route-disabled-badge"> disabled</span>}</span>
               <div className="planner__route-right">
                 {rc.map(c=><span key={`${c.track}-${c.depRoute}`} className={`planner__conn-label${isStaff?' planner__conn-label--rm':''}`} style={{background:trackCol(c.track)}} onClick={e=>{if(!isStaff)return;e.stopPropagation();removeConnection(c);}}>{connLabel(c)}</span>)}
                 <QuantityLabel used={route.value} cap={route.cap} size="md"/>

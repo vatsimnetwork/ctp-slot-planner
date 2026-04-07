@@ -1,7 +1,10 @@
 import os
 import json
+import re
+import sys
 import requests
-from flask import Flask, request, jsonify, redirect
+from datetime import datetime, timezone
+from flask import Flask, request, jsonify, redirect, abort
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -35,7 +38,6 @@ WRITE_ROLES = {"slot_staff", "developer", "administrator"}
 
 def _require_staff(user: dict):
     if not WRITE_ROLES.intersection(user.get("roles", [])):
-        from flask import abort
         abort(403, description="insufficient role")
 
 
@@ -59,9 +61,7 @@ def _from_api_time(t: str) -> str:
 
 def _from_api_datetime(dt_str: str) -> str:
     """Extract UTC time from an ISO-8601 datetime string → '1700z'."""
-    from datetime import timezone
     try:
-        from datetime import datetime
         dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
         dt_utc = dt.astimezone(timezone.utc)
         return f"{dt_utc.hour:02d}{dt_utc.minute:02d}z"
@@ -80,7 +80,6 @@ def _to_api_datetime(spinner_val: str, event_date_str: str) -> str | None:
             hh, mm = int(parts[0]), int(parts[1])
         else:
             return None
-        from datetime import datetime, timezone
         date_parts = event_date_str.split("-")
         dt = datetime(int(date_parts[0]), int(date_parts[1]), int(date_parts[2]), hh, mm, 0, tzinfo=timezone.utc)
         return dt.isoformat().replace("+00:00", "Z")
@@ -113,7 +112,6 @@ def setup():
             dtw_ns = int(raw)
         elif isinstance(raw, str):
             # serialized as Go duration string e.g. "3h0m0s" — parse it
-            import re
             total_ns = 0
             for val, unit in re.findall(r"(\d+(?:\.\d+)?)([hms])", raw):
                 v = float(val)
@@ -164,18 +162,22 @@ def setup():
 
     tag_map = {}
     sector_map = {}
-    tag_to_routes = {}   # tag_name → [{identifier, routeSegmentGroup}]
-    sector_to_routes = {}  # sector_identifier → [{identifier, routeSegmentGroup}]
+    tag_to_routes = {}   # tag_name → [{identifier, routeSegmentGroup, enabled}]
+    sector_to_routes = {}  # sector_identifier → [{identifier, routeSegmentGroup, enabled}]
+    disabled_routes = []
     for seg in route_segments:
         ident = (seg.get("identifier") or "").strip()
         group = (seg.get("routeSegmentGroup") or "").strip()
+        enabled = seg.get("enabled", True)
         if not ident:
             continue
+        if not enabled:
+            disabled_routes.append(ident)
         tags = [t.get("tag") for t in (seg.get("tags") or []) if t.get("tag")]
         if tags:
             tag_map[ident] = tags
             for tag in tags:
-                tag_to_routes.setdefault(tag, []).append({"identifier": ident, "routeSegmentGroup": group})
+                tag_to_routes.setdefault(tag, []).append({"identifier": ident, "routeSegmentGroup": group, "enabled": enabled})
         pfp = seg.get("providedFacilityProgression") or []
         if pfp:
             sector_map[ident] = [
@@ -189,8 +191,10 @@ def setup():
             for s in pfp:
                 if s.get("identifier"):
                     sector_to_routes.setdefault(s["identifier"], []).append(
-                        {"identifier": ident, "routeSegmentGroup": group}
+                        {"identifier": ident, "routeSegmentGroup": group, "enabled": enabled}
                     )
+
+    route_list = ctp_api.build_route_list(route_segments, airports)
 
     # Build per-airport departure time window start map (ICAO → "HHMMz")
     dep_times = {}
@@ -221,6 +225,8 @@ def setup():
         "sectorLimits": sector_limits,
         "tagToRoutes": tag_to_routes,
         "sectorToRoutes": sector_to_routes,
+        "disabledRoutes": disabled_routes,
+        "routeList": route_list,
         "eventId": ctp_api.event_id(),
         "depTimes": dep_times,
         "arrTimes": arr_times,
@@ -264,7 +270,6 @@ def get_slotgroups():
                     slot_groups = _id_groups_to_ident_groups(raw_groups, airport_ident_by_id, rs_ident_by_id)
                 else:
                     # Legacy identifier format: auto-migrate to ID-based and save back.
-                    import sys
                     print("[slot-planner] MIGRATION: draft uses legacy identifier format — migrating to ID-based", file=sys.stderr)
                     airport_id_by_ident, rs_id_by_ident = _build_id_lookups(route_segments, airports)
                     id_based = _ident_groups_to_id_groups(raw_groups, airport_id_by_ident, rs_id_by_ident)
@@ -749,7 +754,6 @@ def _ident_groups_to_id_groups(slot_groups: list, airport_id_by_ident: dict, rs_
     to ID-based [{depAirportId, depRouteId, trackId, arrRouteId, arrAirportId, value}].
     Logs and skips groups where any part cannot be resolved.
     """
-    import sys
     result = []
     for group in slot_groups:
         gid   = group.get("id", "")
@@ -797,7 +801,6 @@ def _id_groups_to_ident_groups(slot_groups: list, airport_ident_by_id: dict, rs_
     Logs and skips groups where any ID cannot be resolved to a current identifier
     (e.g. a route or airport was deleted).
     """
-    import sys
     result = []
     for group in slot_groups:
         value = int(group.get("value", 0))
@@ -835,7 +838,6 @@ def _id_groups_to_ident_groups(slot_groups: list, airport_ident_by_id: dict, rs_
 
 def _generate_slots_from_groups(slot_groups: list) -> list:
     """Generate slot records from ID-based slot groups for submission to the API."""
-    import sys
     result = []
     for group in slot_groups:
         count = int(group.get("value", 0))

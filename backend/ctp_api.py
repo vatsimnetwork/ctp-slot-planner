@@ -303,3 +303,53 @@ def derive_setup(route_segments: list, airports: list, departure_time_window_ns:
         "arrRoutes": sorted(arr_route_first.keys()),
         "arrs":      sorted(airport_ids),
     }
+
+
+def build_route_list(route_segments: list, airports: list) -> list:
+    """Return metadata for every route segment (enabled and disabled) for the slot planner grid visibility filters."""
+    def norm(value: str) -> str:
+        return (value or "").strip().upper()
+
+    def first_fix(seg):
+        locs = sorted(seg.get("locations") or [], key=lambda l: l.get("sortOrder", 0))
+        return norm(locs[0].get("waypoint", {}).get("identifier", "")) if locs else None
+
+    def last_fix(seg):
+        locs = sorted(seg.get("locations") or [], key=lambda l: l.get("sortOrder", 0))
+        return norm(locs[-1].get("waypoint", {}).get("identifier", "")) if locs else None
+
+    airport_ids = {
+        norm(a.get("waypoint", {}).get("identifier", "") or a.get("identifier", ""))
+        for a in (airports or [])
+        if a.get("waypoint", {}).get("identifier", "") or a.get("identifier", "")
+    }
+
+    result = []
+    for seg in route_segments or []:
+        if not isinstance(seg, dict):
+            continue
+        ident = (seg.get("identifier") or "").strip()
+        if not ident:
+            continue
+        group = (seg.get("routeSegmentGroup") or "").strip()
+        enabled = seg.get("enabled", True)
+        acph = seg.get("maximumAircraftPerHour") or 0
+
+        g = norm(group)
+        if g == "OCA":
+            rtype = "track"
+        elif first_fix(seg) in airport_ids:
+            rtype = "dep"
+        elif last_fix(seg) in airport_ids:
+            rtype = "arr"
+        else:
+            rtype = "dep"
+
+        result.append({
+            "identifier": ident,
+            "enabled": enabled,
+            "routeSegmentGroup": group,
+            "type": rtype,
+            "maximumAircraftPerHour": acph if acph and acph < 65535 else None,
+        })
+    return result
