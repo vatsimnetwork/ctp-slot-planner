@@ -52,6 +52,35 @@ export default function CityPairTotalsPage({ data, setupData }) {
 
   const grandTotal = useMemo(() => Object.values(pairTotals).reduce((a, b) => a + b, 0), [pairTotals]);
 
+  // ── Statistics ────────────────────────────────────────────────────────────
+  const depCapTotal = useMemo(() =>
+    deps.reduce((s, d) => s + (defaultCaps.deps[d] ?? 0), 0)
+  , [deps, defaultCaps]);
+
+  const arrCapTotal = useMemo(() =>
+    arrAirports.reduce((s, a) => s + (defaultCaps.arrs[a] ?? 0), 0)
+  , [arrAirports, defaultCaps]);
+
+  const maxPossible = Math.min(depCapTotal, arrCapTotal);
+
+  const routingsPerPair = useMemo(() => {
+    const map = {};
+    for (const conn of (data.connections || [])) {
+      const key = `${conn.dep}|${conn.arr}`;
+      map[key] = (map[key] || 0) + 1;
+    }
+    return map;
+  }, [data.connections]);
+
+  const numPairsWithSlots  = Object.keys(pairTotals).filter(k => (pairTotals[k] || 0) > 0).length;
+  const totalRoutings      = (data.connections || []).length;
+  const numPairsWithRoutes = Object.keys(routingsPerPair).length;
+  const avgRoutings        = numPairsWithRoutes > 0 ? (totalRoutings / numPairsWithRoutes) : 0;
+  const maxRoutings        = numPairsWithRoutes > 0 ? Math.max(...Object.values(routingsPerPair)) : 0;
+  const slotsRemaining     = maxPossible - grandTotal;
+  const slotsPct           = maxPossible > 0 ? Math.round((grandTotal / maxPossible) * 100) : 0;
+  const pairsPct           = reachablePairs.size > 0 ? Math.round((numPairsWithSlots / reachablePairs.size) * 100) : 0;
+
   return (
     <div className="cpt">
       <div className="cpt__scroll-wrap">
@@ -128,6 +157,33 @@ export default function CityPairTotalsPage({ data, setupData }) {
           </tfoot>
         </table>
       </div>
+
+      {grandTotal > 0 && (
+        <div className="cpt__stats">
+          <div className="cpt__stats-row">
+            <span className="cpt__stats-label">Possible slots allocated:</span>
+            <span className="cpt__stats-value">
+              {grandTotal} / {maxPossible} ({slotsRemaining >= 0 ? slotsRemaining : 0} remaining) | {slotsPct}%
+            </span>
+          </div>
+          <div className="cpt__stats-row">
+            <span className="cpt__stats-label">Number of city pairs:</span>
+            <span className="cpt__stats-value">
+              {numPairsWithSlots} / {reachablePairs.size} | {pairsPct}%
+            </span>
+          </div>
+          <div className="cpt__stats-row">
+            <span className="cpt__stats-label">Total number of routings:</span>
+            <span className="cpt__stats-value">{totalRoutings}</span>
+          </div>
+          <div className="cpt__stats-row">
+            <span className="cpt__stats-label">Average routings per city pair:</span>
+            <span className="cpt__stats-value">
+              {avgRoutings.toFixed(1)} (highest: {maxRoutings})
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

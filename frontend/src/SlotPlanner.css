@@ -378,3 +378,21 @@
   text-transform:uppercase; color:var(--accent); opacity:.7; margin-bottom:4px;
 }
 .cpt__grand-total-value { display:block; font-size:22px; font-weight:800; line-height:1; }
+
+/* City pair stats panel */
+.cpt__stats {
+  margin-top:16px; padding:12px 16px;
+  border:1px solid var(--border); border-radius:6px;
+  background:var(--bg-subtle);
+  display:flex; flex-direction:column; gap:6px;
+  max-width:520px;
+}
+.cpt__stats-row { display:flex; justify-content:space-between; align-items:baseline; gap:16px; }
+.cpt__stats-label { font-size:12px; color:var(--text-muted); white-space:nowrap; }
+.cpt__stats-value { font-size:12px; font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap; }
+
+/* Sortable table headers */
+.tl-sort-header { cursor:pointer; user-select:none; white-space:nowrap; }
+.tl-sort-header:hover { color:var(--accent); }
+.tl-sort-header--active { color:var(--accent); }
+.tl-sort-indicator { font-size:9px; margin-left:2px; opacity:.7; }

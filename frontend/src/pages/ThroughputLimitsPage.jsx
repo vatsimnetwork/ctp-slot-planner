@@ -2,7 +2,12 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { API } from '../api.js';
 
 function UsageBar({ used, limit, departureHours }) {
-  if (limit == null || limit >= 65535) return null;
+  const isUnlimited = limit == null || limit >= 65535;
+  if (isUnlimited) {
+    if (!used) return null;
+    const acph = Math.round(used / departureHours);
+    return <span className="tl-usage-val">{used} ({acph}/hr)</span>;
+  }
   const pct    = Math.round((used / limit) * 100);
   const barPct = Math.min(100, pct);
   const over   = used > limit;
@@ -19,6 +24,64 @@ function UsageBar({ used, limit, departureHours }) {
   );
 }
 
+function SortHeader({ label, col, sort, onSort }) {
+  const active = sort.col === col;
+  const indicator = active ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ' ↕';
+  return (
+    <th
+      className={`tl-sort-header${active ? ' tl-sort-header--active' : ''}`}
+      onClick={() => onSort(col)}
+      style={{ cursor: 'pointer', userSelect: 'none' }}
+    >
+      {label}<span className="tl-sort-indicator">{indicator}</span>
+    </th>
+  );
+}
+
+function applySortTags(items, sort, tagUsage) {
+  return [...items].sort((a, b) => {
+    let cmp = 0;
+    if (sort.col === 'name') {
+      cmp = a.tag.localeCompare(b.tag);
+    } else if (sort.col === 'limit') {
+      const aVal = (a.maximumAircraftPerHour == null || a.maximumAircraftPerHour >= 65535) ? Infinity : a.maximumAircraftPerHour;
+      const bVal = (b.maximumAircraftPerHour == null || b.maximumAircraftPerHour >= 65535) ? Infinity : b.maximumAircraftPerHour;
+      cmp = aVal - bVal;
+    } else if (sort.col === 'maxSlots') {
+      const aAcph = a.maximumAircraftPerHour;
+      const bAcph = b.maximumAircraftPerHour;
+      const aVal = (aAcph == null || aAcph >= 65535) ? Infinity : aAcph;
+      const bVal = (bAcph == null || bAcph >= 65535) ? Infinity : bAcph;
+      cmp = aVal - bVal;
+    } else if (sort.col === 'usage') {
+      cmp = (tagUsage[a.tag] || 0) - (tagUsage[b.tag] || 0);
+    }
+    return sort.dir === 'asc' ? cmp : -cmp;
+  });
+}
+
+function applySortSectors(items, sort, sectorUsage) {
+  return [...items].sort((a, b) => {
+    let cmp = 0;
+    if (sort.col === 'name') {
+      cmp = a.identifier.localeCompare(b.identifier);
+    } else if (sort.col === 'limit') {
+      const aVal = (a.maximumAircraftPerHour == null || a.maximumAircraftPerHour >= 65535) ? Infinity : a.maximumAircraftPerHour;
+      const bVal = (b.maximumAircraftPerHour == null || b.maximumAircraftPerHour >= 65535) ? Infinity : b.maximumAircraftPerHour;
+      cmp = aVal - bVal;
+    } else if (sort.col === 'maxSlots') {
+      const aAcph = a.maximumAircraftPerHour;
+      const bAcph = b.maximumAircraftPerHour;
+      const aVal = (aAcph == null || aAcph >= 65535) ? Infinity : aAcph;
+      const bVal = (bAcph == null || bAcph >= 65535) ? Infinity : bAcph;
+      cmp = aVal - bVal;
+    } else if (sort.col === 'usage') {
+      cmp = (sectorUsage[a.identifier] || 0) - (sectorUsage[b.identifier] || 0);
+    }
+    return sort.dir === 'asc' ? cmp : -cmp;
+  });
+}
+
 export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {}, sectorUsage = {}, departureHours = 3, tagToRoutes = {}, sectorToRoutes = {}, routeSlots = {} }) {
   const [tagLimits, setTagLimits] = useState([]);
   const [sectors,   setSectors]   = useState([]);
@@ -30,6 +93,8 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
   const [secGroupFilter,  setSecGroupFilter]  = useState('');
   const [expandedTags,    setExpandedTags]    = useState(new Set());
   const [expandedSectors, setExpandedSectors] = useState(new Set());
+  const [tagSort,  setTagSort]  = useState({ col: 'name', dir: 'asc' });
+  const [secSort,  setSecSort]  = useState({ col: 'name', dir: 'asc' });
 
   useEffect(() => {
     API.loadThroughputLimits()
@@ -62,6 +127,13 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
   const toggleTag    = tag => setExpandedTags(s    => { const n = new Set(s); n.has(tag) ? n.delete(tag) : n.add(tag); return n; });
   const toggleSector = id  => setExpandedSectors(s => { const n = new Set(s); n.has(id)  ? n.delete(id)  : n.add(id);  return n; });
 
+  const handleTagSort = (col) => {
+    setTagSort(prev => ({ col, dir: prev.col === col && prev.dir === 'asc' ? 'desc' : 'asc' }));
+  };
+  const handleSecSort = (col) => {
+    setSecSort(prev => ({ col, dir: prev.col === col && prev.dir === 'asc' ? 'desc' : 'asc' }));
+  };
+
   const tagGroups = useMemo(() => {
     const gs = new Set();
     Object.values(tagToRoutes).forEach(routes => routes.forEach(r => { if (r.routeSegmentGroup) gs.add(r.routeSegmentGroup); }));
@@ -79,7 +151,7 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
   const tagQ = tagSearch.trim().toLowerCase();
   const secQ = sectorSearch.trim().toLowerCase();
 
-  const visibleTags = tagLimits.filter(t => {
+  const filteredTags = tagLimits.filter(t => {
     if (tagQ && !t.tag.toLowerCase().includes(tagQ)) return false;
     if (tagGroupFilter) {
       const routes = tagToRoutes[t.tag] || [];
@@ -88,7 +160,7 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
     return true;
   });
 
-  const visibleSectors = sectors.filter(s => {
+  const filteredSectors = sectors.filter(s => {
     if (secQ && !s.identifier.toLowerCase().includes(secQ)) return false;
     if (secGroupFilter) {
       const routes = sectorToRoutes[s.identifier] || [];
@@ -96,6 +168,9 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
     }
     return true;
   });
+
+  const visibleTags    = applySortTags(filteredTags, tagSort, tagUsage);
+  const visibleSectors = applySortSectors(filteredSectors, secSort, sectorUsage);
 
   const fmtLimit = (acph) => (acph == null || acph >= 65535) ? '∞' : String(acph);
   const fmtSlots = (acph) => (acph == null || acph >= 65535) ? '∞' : String(Math.floor(acph * departureHours));
@@ -124,7 +199,14 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
             : (
               <table className="throughput-limits__table">
                 <thead>
-                  <tr><th></th><th>Tag</th><th>Groups</th><th>Max / Hour</th><th>Max Slots</th><th>Usage</th></tr>
+                  <tr>
+                    <th></th>
+                    <SortHeader label="Tag"       col="name"    sort={tagSort} onSort={handleTagSort} />
+                    <th>Groups</th>
+                    <SortHeader label="Max / Hour" col="limit"   sort={tagSort} onSort={handleTagSort} />
+                    <SortHeader label="Max Slots"  col="maxSlots" sort={tagSort} onSort={handleTagSort} />
+                    <SortHeader label="Usage"      col="usage"   sort={tagSort} onSort={handleTagSort} />
+                  </tr>
                 </thead>
                 <tbody>
                   {visibleTags.map(t => {
@@ -190,7 +272,14 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
             : (
               <table className="throughput-limits__table">
                 <thead>
-                  <tr><th></th><th>Sector</th><th>Groups</th><th>Max / Hour</th><th>Max Slots</th><th>Usage</th></tr>
+                  <tr>
+                    <th></th>
+                    <SortHeader label="Sector"     col="name"    sort={secSort} onSort={handleSecSort} />
+                    <th>Groups</th>
+                    <SortHeader label="Max / Hour" col="limit"   sort={secSort} onSort={handleSecSort} />
+                    <SortHeader label="Max Slots"  col="maxSlots" sort={secSort} onSort={handleSecSort} />
+                    <SortHeader label="Usage"      col="usage"   sort={secSort} onSort={handleSecSort} />
+                  </tr>
                 </thead>
                 <tbody>
                   {visibleSectors.map(s => {
