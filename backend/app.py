@@ -222,12 +222,33 @@ def setup():
             if spinner_val:
                 arr_times[icao] = spinner_val
 
+    _SLOT_GEN_MODE_NAMES     = {0: "Random", 1: "MaximizeAirportPairs", 2: "MaximizeSlots"}
+    _DTW_OFFSETS_MODE_NAMES  = {0: "None", 1: "EarliestRoutes", 2: "LatestRoutes", 3: "RouteAverage"}
+    _WAYPOINT_TP_MODE_NAMES  = {0: "None", 1: "FirstWaypointsOfNATRouteSegmentsOnly", 2: "AllWaypoints"}
+
+    calc_params = {}
+    if event:
+        calc_params = {
+            "IntendedSlotGenerationMode":                            _SLOT_GEN_MODE_NAMES.get(event.get("intendedSlotGenerationMode", 2), "MaximizeSlots"),
+            "DepartureTimeWindowOffsetSynchronizationLongitude":     event.get("departureTimeWindowOffsetSynchronizationLongitude", -30),
+            "SimulationAnalysisResolutionInMinutes":                 event.get("simulationAnalysisResolutionInMinutes", 2),
+            "ShouldSimulationUseActualWeatherForecastData":          event.get("shouldSimulationUseActualWeatherForecastData", False),
+            "IntendedDepartureTimeWindowOffsetsCalculationMode":     _DTW_OFFSETS_MODE_NAMES.get(event.get("intendedDepartureTimeWindowOffsetsCalculationMode", 1), "EarliestRoutes"),
+            "DepartureTimeWindowOffsetSynchronizationTimeOfDay":     _from_api_time(event.get("departureTimeWindowOffsetSynchronizationTimeOfDay", "16:00:00")),
+            "CalculateThroughputDataOnlyForManuallyProvidedSectors": event.get("calculateThroughputDataOnlyForManuallyProvidedSectors", True),
+            "IntendedWaypointThroughputCalculationMode":             _WAYPOINT_TP_MODE_NAMES.get(event.get("intendedWaypointThroughputCalculationMode", 1), "FirstWaypointsOfNATRouteSegmentsOnly"),
+            "ThresholdToCheckIfAirplaneIsCountedAtWaypointInNm":     event.get("thresholdToCheckIfAirplaneIsCountedAtWaypointInNm", 5),
+            "CalculationFallbackGroundSpeed":                        event.get("calculationFallbackGroundSpeed", 300),
+            "HighSimulationAccuracy":                                event.get("highSimulationAccuracy", False),
+        }
+
     return jsonify({
         **derived,
         "routesRevision": routes_revision,
         "isStaff": is_staff,
         "isRouteStaff": is_route_staff,
         "syncTime": _from_api_time(event.get("departureTimeWindowOffsetSynchronizationTimeOfDay", "16:00:00")) if event else "1600z",
+        "calcParams": calc_params,
         "tagMap": tag_map,
         "sectorMap": sector_map,
         "tagLimits": tag_limits,
@@ -430,7 +451,7 @@ def submit_slotgroups():
 
     try:
         if event_update:
-            ctp_api.update_event(ctp_api.event_id(), event_update)
+            ctp_api.patch_event_calculation_params(ctp_api.event_id(), event_update)
 
         if mode == "simulate":
             slot_groups, caps, planner_revisions, sim_warning, commentary = _submit_simulate(body)

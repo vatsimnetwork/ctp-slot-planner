@@ -89,7 +89,7 @@ export default function SlotPlanner() {
       setIsStaff(setup.isStaff ?? false);
       setIsRouteStaff(setup.isRouteStaff ?? false);
       if (setup.eventId)  eventIdRef.current = setup.eventId;
-      setSimParams(p => ({ ...p, DepartureTimeWindowOffsetSynchronizationTimeOfDay: setup.syncTime || p.DepartureTimeWindowOffsetSynchronizationTimeOfDay }));
+      setSimParams(p => ({ ...p, ...(setup.calcParams || {}) }));
       if (setup.depTimes) setDepTimes(setup.depTimes);
       if (setup.arrTimes) setArrTimes(setup.arrTimes);
       const slotGroups = Array.isArray(raw) ? raw : (raw.slotGroups ?? []);

@@ -74,6 +74,10 @@ def update_event(eid: int, fields: dict):
     return _put(f"/events/{eid}", fields)
 
 
+def patch_event_calculation_params(eid: int, fields: dict):
+    return _patch(f"/events/{eid}/calculation-params", fields)
+
+
 # ── Route segments ────────────────────────────────────────────────────────────
 
 def get_route_segments(eid: int = None):
