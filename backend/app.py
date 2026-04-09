@@ -242,6 +242,11 @@ def setup():
             "HighSimulationAccuracy":                                event.get("highSimulationAccuracy", False),
         }
 
+    # Only expose tags/sectors that currently have at least one route.
+    # The records themselves persist in the DB so limits are not lost.
+    active_tag_limits = [t for t in tag_limits if t.get("name") in tag_to_routes or t.get("tag") in tag_to_routes]
+    active_sector_limits = [s for s in sector_limits if s.get("identifier") in sector_to_routes]
+
     return jsonify({
         **derived,
         "routesRevision": routes_revision,
@@ -251,8 +256,8 @@ def setup():
         "calcParams": calc_params,
         "tagMap": tag_map,
         "sectorMap": sector_map,
-        "tagLimits": tag_limits,
-        "sectorLimits": sector_limits,
+        "tagLimits": active_tag_limits,
+        "sectorLimits": active_sector_limits,
         "tagToRoutes": tag_to_routes,
         "sectorToRoutes": sector_to_routes,
         "disabledRoutes": disabled_routes,

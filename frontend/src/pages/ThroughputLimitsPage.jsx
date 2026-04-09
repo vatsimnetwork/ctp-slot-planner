@@ -99,7 +99,16 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
   useEffect(() => {
     API.loadThroughputLimits()
       .then(r => r.ok ? r.json() : Promise.reject(`Load failed (${r.status})`))
-      .then(d => { setTagLimits(d.tagLimits || []); setSectors(d.sectors || []); setLoaded(true); })
+      .then(d => {
+        // Only show tags/sectors that currently have at least one route.
+        // The records persist in the DB so limits are not lost when routes are
+        // temporarily removed.
+        const activeTags = (d.tagLimits || []).filter(t => (tagToRoutes[t.tag] || tagToRoutes[t.name] || []).length > 0);
+        const activeSectors = (d.sectors || []).filter(s => (sectorToRoutes[s.identifier] || []).length > 0);
+        setTagLimits(activeTags);
+        setSectors(activeSectors);
+        setLoaded(true);
+      })
       .catch(err => addToast(String(err), 'error'));
   }, []);
 
