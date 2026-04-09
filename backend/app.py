@@ -375,6 +375,16 @@ def save_slotgroups():
         airport_id_by_ident, rs_id_by_ident = _build_id_lookups(route_segments, airports)
         id_based_groups.extend(_ident_groups_to_id_groups(needs_resolution, airport_id_by_ident, rs_id_by_ident))
 
+    # Consolidate duplicate routings by summing their values.
+    merged = {}
+    for g in id_based_groups:
+        key = (g["depAirportId"], g["depRouteId"], g["trackId"], g["arrRouteId"], g["arrAirportId"])
+        if key in merged:
+            merged[key]["value"] += g["value"]
+        else:
+            merged[key] = dict(g)
+    id_based_groups = list(merged.values())
+
     commentary = json.dumps({
         "slotGroups": id_based_groups,
         "caps":       body.get("caps", {}),
@@ -859,8 +869,9 @@ def _id_groups_to_ident_groups(slot_groups: list, airport_ident_by_id: dict, rs_
                 file=sys.stderr,
             )
             continue
+        ident = f"{dep}|{dr}|{track}|{ar}|{arr}"
         result.append({
-            "id":           f"{dep}|{dr}|{track}|{ar}|{arr}",
+            "id":           ident,
             "value":        value,
             "depAirportId": group.get("depAirportId"),
             "depRouteId":   group.get("depRouteId"),
@@ -868,7 +879,16 @@ def _id_groups_to_ident_groups(slot_groups: list, airport_ident_by_id: dict, rs_
             "arrRouteId":   group.get("arrRouteId"),
             "arrAirportId": group.get("arrAirportId"),
         })
-    return result
+
+    # Consolidate duplicate routings by summing their values.
+    merged = {}
+    for g in result:
+        key = g["id"]
+        if key in merged:
+            merged[key]["value"] += g["value"]
+        else:
+            merged[key] = dict(g)
+    return list(merged.values())
 
 
 def _generate_slots_from_groups(slot_groups: list) -> list:

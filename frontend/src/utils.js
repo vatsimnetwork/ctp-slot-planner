@@ -19,9 +19,14 @@ export function parseSlotGroups(slotGroups, caps = {}) {
     arrs:      caps.arrs      || {},
   };
 
+  const connMap = {};
   (slotGroups || []).forEach(({ id, value, depAirportId, depRouteId, trackId, arrRouteId, arrAirportId }) => {
     const p = splitSlotId(id); if (!p) return;
     const [dep, depRoute, track, arrRoute, arr] = p;
+    if (connMap[id]) { connMap[id].value += value; return; }
+    connMap[id] = { dep, depRoute, track, arrRoute, arr, value, depAirportId, depRouteId, trackId, arrRouteId, arrAirportId };
+  });
+  Object.values(connMap).forEach(({ dep, depRoute, track, arrRoute, arr, value, depAirportId, depRouteId, trackId, arrRouteId, arrAirportId }) => {
     if (!deps[dep])           deps[dep]           = { id: dep,      value: 0, cap: C.deps[dep]           ?? null };
     if (!depRoutes[depRoute]) depRoutes[depRoute]  = { id: depRoute, value: 0, cap: C.depRoutes[depRoute] ?? null, selected: true };
     if (!tracks[track])       tracks[track]        = { id: track,    col: TRACK_COLS[tcIdx++ % TRACK_COLS.length], slots: 0, cap: C.tracks[track] ?? null };
