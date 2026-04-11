@@ -183,17 +183,20 @@
 .planner__cell--dep:hover { background:var(--bg-hover); }
 .planner__cell--selected { background:var(--bg-selected) !important; }
 .planner__cell--dimmed { opacity:.2; }
-.planner__cell--track { flex-direction:column; justify-content:center; gap:3px; overflow:hidden; padding-top:0; padding-bottom:0; position:relative; }
+.planner__cell--track { flex-direction:column; justify-content:center; gap:3px; overflow:hidden; padding-top:0; padding-bottom:0; position:relative; cursor:pointer; }
+.planner__cell--track:hover { background:var(--bg-hover); }
 .planner__track-main { display:flex; flex-direction:column; align-items:center; gap:2px; }
 .planner__label-cluster--compact { position:absolute; bottom:3px; left:0; right:0; justify-content:center; padding:0 4px; }
-.planner__cell--right { justify-content:flex-end; gap:8px; }
+.planner__cell--right { justify-content:flex-end; gap:8px; cursor:pointer; }
+.planner__cell--right:hover { background:var(--bg-hover); }
 .planner__cell-dep-info { display:flex; flex-direction:column; gap:2px; }
 .planner__cell-dep-right { display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
 .planner__dep-time-label { font-size:12px; font-weight:600; color:var(--text-muted); font-family:'Inter',monospace; }
 .planner__cell-arr-info { display:flex; flex-direction:column; }
 .planner__cell-name { font-size:16px; font-weight:700; color:var(--text); }
-.planner__route-row { display:flex; align-items:center; justify-content:space-between; padding:0 12px; border-bottom:1px solid var(--border-subtle); transition:opacity .12s; }
+.planner__route-row { display:flex; align-items:center; justify-content:space-between; padding:0 12px; border-bottom:1px solid var(--border-subtle); transition:opacity .12s,background .12s; cursor:pointer; }
 .planner__route-row:last-child { border-bottom:none; }
+.planner__route-row:hover { background:var(--bg-hover); }
 .planner__route-name { font-size:14px; font-weight:700; color:var(--accent); letter-spacing:.02em; white-space:nowrap; }
 .planner__route-right { display:flex; align-items:center; gap:5px; flex-shrink:0; }
 
@@ -293,8 +296,12 @@
 .tl-usage-bar__wrap { display:flex; flex-direction:column; gap:3px; min-width:120px; }
 .tl-usage-bar { height:6px; background:var(--bg-subtle); border-radius:3px; overflow:hidden; }
 .tl-usage-bar::after { content:''; display:block; height:100%; width:var(--pct); background:var(--bar-color); border-radius:3px; transition:width .3s; }
+.tl-usage-bar--unlimited { background:var(--bg-subtle); }
+.tl-usage-bar--unlimited::after { background:var(--text-faint); width:100%; opacity:.4; }
 .tl-usage-val { font-size:11px; color:var(--text-muted); white-space:nowrap; }
 .tl-usage-val--over { color:var(--danger,#ef4444); font-weight:700; }
+.tl-usage-val--unlimited { color:var(--text-muted); }
+.tl-row--unlimited { }
 
 /* ── City Pair Totals page ── */
 .cpt { padding:24px 28px; }

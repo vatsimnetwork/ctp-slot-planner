@@ -4,9 +4,15 @@ import { API } from '../api.js';
 function UsageBar({ used, limit, departureHours }) {
   const isUnlimited = limit == null || limit >= 65535;
   if (isUnlimited) {
-    if (!used) return null;
     const acph = Math.round(used / departureHours);
-    return <span className="tl-usage-val">{used} ({acph}/hr)</span>;
+    return (
+      <div className="tl-usage-bar__wrap">
+        <div className="tl-usage-bar tl-usage-bar--unlimited" style={{ '--pct': '100%' }} />
+        <span className="tl-usage-val tl-usage-val--unlimited">
+          {used} ({acph}/hr) · ∞
+        </span>
+      </div>
+    );
   }
   const pct    = Math.round((used / limit) * 100);
   const barPct = Math.min(100, pct);
@@ -226,9 +232,10 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
                     const used     = tagUsage[t.tag] || 0;
                     const isOver   = slotLim != null && used > slotLim;
                     const expanded = expandedTags.has(t.tag);
+                    const isUnlimited = slotLim == null;
                     return (
                       <React.Fragment key={t.tag}>
-                        <tr className={`tl-row${isOver ? ' tl-row--over' : ''}`} onClick={() => toggleTag(t.tag)} style={{ cursor: routes.length ? 'pointer' : 'default' }}>
+                        <tr className={`tl-row${isOver ? ' tl-row--over' : ''}${isUnlimited ? ' tl-row--unlimited' : ''}`} onClick={() => toggleTag(t.tag)} style={{ cursor: routes.length ? 'pointer' : 'default' }}>
                           <td className="tl-expand-col">{routes.length > 0 ? (expanded ? '▾' : '▸') : ''}</td>
                           <td className="tl-name">{t.tag}</td>
                           <td className="tl-groups">{groups}</td>
@@ -299,9 +306,10 @@ export default function ThroughputLimitsPage({ isStaff, addToast, tagUsage = {},
                     const used     = sectorUsage[s.identifier] || 0;
                     const isOver   = slotLim != null && used > slotLim;
                     const expanded = expandedSectors.has(s.id);
+                    const isUnlimited = slotLim == null;
                     return (
                       <React.Fragment key={s.id}>
-                        <tr className={`tl-row${isOver ? ' tl-row--over' : ''}`} onClick={() => toggleSector(s.id)} style={{ cursor: routes.length ? 'pointer' : 'default' }}>
+                        <tr className={`tl-row${isOver ? ' tl-row--over' : ''}${isUnlimited ? ' tl-row--unlimited' : ''}`} onClick={() => toggleSector(s.id)} style={{ cursor: routes.length ? 'pointer' : 'default' }}>
                           <td className="tl-expand-col">{routes.length > 0 ? (expanded ? '▾' : '▸') : ''}</td>
                           <td className="tl-name">{s.identifier}</td>
                           <td className="tl-groups">{groups}</td>

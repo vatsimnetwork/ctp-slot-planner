@@ -23,7 +23,7 @@ export default function SlotPlanner() {
   const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[], tracksByDepRoute:{}, arrRoutesByTrack:{}, arrByArrRoute:{}, dbIds:{airports:{},routeSegments:{}}, departureHours:3, defaultCaps:{deps:{},depRoutes:{},tracks:{},arrRoutes:{},arrs:{}}, tagMap:{}, sectorMap:{}, tagLimits:[], sectorLimits:[], tagToRoutes:{}, sectorToRoutes:{}, disabledRoutes:[], routeList:[] });
   const [simVersion,       setSimVersion]       = useState(null);
   const [plannerRevisions, setPlannerRevisions] = useState(0);
-  const [selectedDep, setSelectedDep] = useState(null);
+  const [selectedEntity, setSelectedEntity] = useState(null);
   const [depTimes,    setDepTimes]    = useState({});
   const [arrTimes,    setArrTimes]    = useState({});
   const [newRoute,    setNewRoute]    = useState({ dep:'', depRoute:'', track:'', arrRoute:'', arr:'', value:0 });
@@ -105,10 +105,8 @@ export default function SlotPlanner() {
 
   useEffect(() => { loadAll(); }, []);
 
-  useEffect(() => { if (selectedDep) setNewRoute(p => ({...p, dep:selectedDep, depRoute:''})); }, [selectedDep]);
-
   useEffect(() => {
-    const onKeyDown = e => { if (e.key === 'Escape') { setSelectedDep(null); setShowLimitModal(false); } };
+    const onKeyDown = e => { if (e.key === 'Escape') { setSelectedEntity(null); setShowLimitModal(false); } };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
@@ -277,9 +275,27 @@ export default function SlotPlanner() {
   const ddTracks    = (depRoute) => [...new Set([...(setupData.tracksByDepRoute[depRoute] || []), ...connections.filter(c => c.depRoute === depRoute).map(c => c.track)])].sort();
   const ddArrRoutes = (track) => [...new Set([...(setupData.arrRoutesByTrack[track] || []), ...connections.filter(c => c.track === track).map(c => c.arrRoute)])].sort();
   const autoArr     = (arrRoute) => setupData.arrByArrRoute[arrRoute] || null;
+  const lookupConn  = (dep, depRoute, track, arrRoute, arr) =>
+    connections.find(c => c.dep===dep && c.depRoute===depRoute && c.track===track && c.arrRoute===arrRoute && c.arr===arr) || null;
+  const fillNewRouteValue = (nr) => {
+    const { dep, depRoute, track, arrRoute, arr } = nr;
+    if (!dep || !depRoute || !track || !arrRoute || !arr) return nr;
+    const existing = lookupConn(dep, depRoute, track, arrRoute, arr);
+    return existing ? { ...nr, value: existing.value } : nr;
+  };
 
-  const selConnsAll = selectedDep ? connections.filter(c=>c.dep===selectedDep) : [];
-  const selConns    = selectedDep ? filteredConns.filter(c=>c.dep===selectedDep) : [];
+  const getSelConns = () => {
+    if (!selectedEntity) return [];
+    switch (selectedEntity.type) {
+      case 'dep':      return connections.filter(c => c.dep === selectedEntity.id);
+      case 'depRoute': return connections.filter(c => c.depRoute === selectedEntity.id);
+      case 'track':    return connections.filter(c => c.track === selectedEntity.id);
+      case 'arrRoute': return connections.filter(c => c.arrRoute === selectedEntity.id);
+      case 'arr':      return connections.filter(c => c.arr === selectedEntity.id);
+    }
+  };
+  const selConnsAll = getSelConns();
+  const selConns    = selConnsAll.filter(c => filteredConns.includes(c));
   const connLabel   = (conn) => { const i=selConnsAll.findIndex(c=>c.depRoute===conn.depRoute&&c.track===conn.track&&c.arrRoute===conn.arrRoute&&c.arr===conn.arr); return i>=0?String.fromCharCode(65+i):''; };
   const trackCol    = (id)   => tracks.find(t=>t.id===id)?.col||'#2A3B90';
 
@@ -352,20 +368,25 @@ export default function SlotPlanner() {
   const addConnection = () => {
     const { dep, depRoute, track, arrRoute, arr, value } = newRoute;
     if (!dep||!depRoute||!track||!arrRoute||!arr) { addToast('Fill in all five fields','warning'); return; }
-    if (data.connections.some(c=>c.dep===dep&&c.depRoute===depRoute&&c.track===track&&c.arrRoute===arrRoute&&c.arr===arr)) { addToast('Connection already exists','warning'); return; }
     hasEdits.current = true;
     setIsDirty(true);
     const dc = setupData.defaultCaps || {};
     setData(prev => {
       const dbIds = setupData.dbIds || {};
-      const newConns = [...prev.connections,{
-        dep, depRoute, track, arrRoute, arr, value,
-        depAirportId:  dbIds.airports?.[dep]         ?? null,
-        depRouteId:    dbIds.routeSegments?.[depRoute] ?? null,
-        trackId:       dbIds.routeSegments?.[track]    ?? null,
-        arrRouteId:    dbIds.routeSegments?.[arrRoute] ?? null,
-        arrAirportId:  dbIds.airports?.[arr]           ?? null,
-      }];
+      const existingIdx = prev.connections.findIndex(c=>c.dep===dep&&c.depRoute===depRoute&&c.track===track&&c.arrRoute===arrRoute&&c.arr===arr);
+      let newConns;
+      if (existingIdx >= 0) {
+        newConns = prev.connections.map((c,i) => i === existingIdx ? { ...c, value, depAirportId: dbIds.airports?.[dep]??c.depAirportId, depRouteId: dbIds.routeSegments?.[depRoute]??c.depRouteId, trackId: dbIds.routeSegments?.[track]??c.trackId, arrRouteId: dbIds.routeSegments?.[arrRoute]??c.arrRouteId, arrAirportId: dbIds.airports?.[arr]??c.arrAirportId } : c);
+      } else {
+        newConns = [...prev.connections,{
+          dep, depRoute, track, arrRoute, arr, value,
+          depAirportId:  dbIds.airports?.[dep]         ?? null,
+          depRouteId:    dbIds.routeSegments?.[depRoute] ?? null,
+          trackId:       dbIds.routeSegments?.[track]    ?? null,
+          arrRouteId:    dbIds.routeSegments?.[arrRoute] ?? null,
+          arrAirportId:  dbIds.airports?.[arr]           ?? null,
+        }];
+      }
       const ensureDep = prev.deps.some(d=>d.id===dep)?prev.deps:[...prev.deps,{id:dep,value:0,cap:dc.deps?.[dep]??null}];
       const ensureDR  = prev.depRoutes.some(r=>r.id===depRoute)?prev.depRoutes:[...prev.depRoutes,{id:depRoute,value:0,cap:dc.depRoutes?.[depRoute]??null,selected:true}];
       const ensureTr  = prev.tracks.some(t=>t.id===track)?prev.tracks:[...prev.tracks,{id:track,col:TRACK_COLS[prev.tracks.length%TRACK_COLS.length],slots:0,cap:dc.tracks?.[track]??null}];
@@ -431,7 +452,7 @@ export default function SlotPlanner() {
     const update = () => { const cr=gridRef.current.getBoundingClientRect(); const rects=Array.from(gridRef.current.querySelectorAll('.col')).map(c=>{const r=c.getBoundingClientRect();return{left:r.left-cr.left,right:r.right-cr.left};}); setColPositions({rects,totalWidth:cr.width}); };
     update(); window.addEventListener('resize',update); return ()=>window.removeEventListener('resize',update);
   }, [data, searchTerm, activeTab, gridVisibility]);
-  useLayoutEffect(()=>{ if(editRef.current) setBraceHeight(editRef.current.offsetHeight); }, [selConns.length,selectedDep]);
+  useLayoutEffect(()=>{ if(editRef.current) setBraceHeight(editRef.current.offsetHeight); }, [selConns.length,selectedEntity]);
 
   // ── D3 Sankey ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -458,7 +479,7 @@ export default function SlotPlanner() {
     filteredConns.forEach(conn=>{
       const di=vDeps.findIndex(d=>d.id===conn.dep); const dri=oDR.findIndex(r=>r.id===conn.depRoute); const ti=oTr.findIndex(t=>t.id===conn.track); const ari=oAR.findIndex(r=>r.id===conn.arrRoute); const ai=oArrs.findIndex(a=>a.id===conn.arr);
       if(di<0||dri<0||ti<0||ari<0||ai<0) return; const trk=oTr[ti]; if(!trk) return;
-      const hi=!selectedDep||selectedDep===conn.dep; const ds=depRoutes.find(r=>r.id===conn.depRoute)?.selected; const as=arrRoutes.find(r=>r.id===conn.arrRoute)?.selected;
+      const hi=!selectedEntity||(selectedEntity.type==='dep'&&selectedEntity.id===conn.dep)||(selectedEntity.type==='depRoute'&&selectedEntity.id===conn.depRoute)||(selectedEntity.type==='track'&&selectedEntity.id===conn.track)||(selectedEntity.type==='arrRoute'&&selectedEntity.id===conn.arrRoute)||(selectedEntity.type==='arr'&&selectedEntity.id===conn.arr); const ds=depRoutes.find(r=>r.id===conn.depRoute)?.selected; const as=arrRoutes.find(r=>r.id===conn.arrRoute)?.selected;
       const alpha=hi?(ds&&as?0.65:0.08):0.03; const bw=thick(conn.value);
       const dcy=depCenterYs[di]??itemY(di,vDeps.length);
       const tcy=trackCenterYs[ti]??itemY(ti,oTr.length);
@@ -468,7 +489,7 @@ export default function SlotPlanner() {
       band(rects[2].right,tcy,rects[3].left,itemY(ari,oAR.length),trk.col,alpha,bw);
       band(rects[3].right,itemY(ari,oAR.length),rects[4].left,acy,trk.col,alpha,bw);
     });
-  }, [data, colPositions, selectedDep, searchTerm, gridVisibility]); // colPositions kept so resize triggers redraw
+  }, [data, colPositions, selectedEntity, searchTerm, gridVisibility]); // colPositions kept so resize triggers redraw
 
   const liveSlots = {}; connections.forEach(c=>{liveSlots[c.track]=(liveSlots[c.track]||0)+c.value;});
   const liveRouteSlots = {};
@@ -616,10 +637,10 @@ export default function SlotPlanner() {
 
       {/* Control bar */}
       {activeTab === 'planner' && <div className="planner__control-bar" onClick={e=>e.stopPropagation()}>
-        {selectedDep && <div className="planner__editing-label"><span className="planner__editing-dot"/>Editing: <strong>{selectedDep}</strong></div>}
+        {selectedEntity && <div className="planner__editing-label"><span className="planner__editing-dot"/>Editing: <strong>{selectedEntity.type}: {selectedEntity.id}</strong></div>}
 
         <div className="planner__instructions">
-          Click a departure to edit its connections. Use the dropdowns below to add new connections. Hover quantity labels to adjust values. Caps can be set when a departure is selected.
+          Click a cell to edit its connections. Use the dropdowns below to add or adjust connections. Caps can be set when an entity is selected.
         </div>
 
         <div className="search-container">
@@ -635,27 +656,27 @@ export default function SlotPlanner() {
           </select>
         </div>
         <div className="planner__control-add">
-          <select disabled={!isStaff} value={newRoute.dep} onChange={e=>setNewRoute(r=>({...r,dep:e.target.value,depRoute:'',track:'',arrRoute:'',arr:''}))}>
+          <select disabled={!isStaff} value={newRoute.dep} onChange={e=>setNewRoute(r=>fillNewRouteValue({...r,dep:e.target.value,depRoute:'',track:'',arrRoute:'',arr:'',value:0}))}>
             <option value="">Departure</option>{ddDeps.map(d=><option key={d} value={d}>{d}</option>)}
           </select>
-          <select disabled={!isStaff} value={newRoute.depRoute} onChange={e=>setNewRoute(r=>({...r,depRoute:e.target.value,track:'',arrRoute:'',arr:''}))}>
+          <select disabled={!isStaff} value={newRoute.depRoute} onChange={e=>setNewRoute(r=>fillNewRouteValue({...r,depRoute:e.target.value,track:'',arrRoute:'',arr:'',value:0}))}>
             <option value="">Dep Route</option>{ddDepRoutes(newRoute.dep).map(r=><option key={r} value={r}>{r}</option>)}
           </select>
-          <select disabled={!isStaff} value={newRoute.track} onChange={e=>setNewRoute(r=>({...r,track:e.target.value,arrRoute:'',arr:''}))}>
+          <select disabled={!isStaff} value={newRoute.track} onChange={e=>setNewRoute(r=>fillNewRouteValue({...r,track:e.target.value,arrRoute:'',arr:'',value:0}))}>
             <option value="">Track</option>{ddTracks(newRoute.depRoute).map(t=><option key={t} value={t}>{t}</option>)}
           </select>
-          <select disabled={!isStaff} value={newRoute.arrRoute} onChange={e=>{const ar=e.target.value;setNewRoute(r=>({...r,arrRoute:ar,arr:autoArr(ar)||''}));}}>
+          <select disabled={!isStaff} value={newRoute.arrRoute} onChange={e=>{const ar=e.target.value;setNewRoute(r=>fillNewRouteValue({...r,arrRoute:ar,arr:autoArr(ar)||'',value:0}));}}>
             <option value="">Arr Route</option>{ddArrRoutes(newRoute.track).map(r=><option key={r} value={r}>{r}</option>)}
           </select>
-          <select disabled={!isStaff || !!autoArr(newRoute.arrRoute)} value={newRoute.arr} onChange={e=>setNewRoute(r=>({...r,arr:e.target.value}))}>
+          <select disabled={!isStaff || !!autoArr(newRoute.arrRoute)} value={newRoute.arr} onChange={e=>setNewRoute(r=>fillNewRouteValue({...r,arr:e.target.value}))}>
             <option value="">{autoArr(newRoute.arrRoute) ? autoArr(newRoute.arrRoute) : 'Arrival'}</option>
             {!autoArr(newRoute.arrRoute) && [...new Set([...setupData.arrs,...arrs.map(a=>a.id)])].sort().map(a=><option key={a} value={a}>{a}</option>)}
           </select>
           <input disabled={!isStaff} className="planner__ctrl-num" type="number" min={0} value={newRoute.value} onChange={e=>setNewRoute(r=>({...r,value:parseInt(e.target.value)||0}))}/>
-          <button disabled={!isStaff} className="planner__btn" onClick={addConnection}>Add</button>
+          <button disabled={!isStaff} className="planner__btn" onClick={addConnection}>Adjust</button>
         </div>
 
-        {selectedDep && selConns.length > 0 && (
+        {selectedEntity && selConns.length > 0 && (
           <div className="planner__brace-section">
             <div className="planner__brace-col" style={{width:BRACE_COL_W,minHeight:braceHeight}}>
               <div className="planner__brace-svg-wrap"><CurlyBrace height={braceHeight}/></div>
@@ -665,7 +686,7 @@ export default function SlotPlanner() {
                 <div key={`${c.depRoute}-${c.track}-${c.arrRoute}-${c.arr}`} className="planner__control-row">
                   <span className="planner__conn-label" style={{background:trackCol(c.track)}}>{connLabel(c)}</span>
                   <select disabled={!isStaff} value={c.depRoute} onChange={e=>editConn(c,'depRoute',e.target.value)}>
-                    {ddDepRoutes(selectedDep).map(r => <option key={r} value={r}>{r}</option>)}
+                    {ddDepRoutes(c.dep).map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                   <select disabled={!isStaff} value={c.track} onChange={e=>editConn(c,'track',e.target.value)}>{ddTracks(c.depRoute).map(t=><option key={t} value={t}>{t}</option>)}</select>
                   <select disabled={!isStaff} value={c.arrRoute} onChange={e=>{const ar=e.target.value;const a=autoArr(ar);hasEdits.current=true;setIsDirty(true);setData(prev=>{const dbIds=setupData.dbIds||{};const newConns=prev.connections.map(x=>x===c?{...x,arrRoute:ar,arrRouteId:dbIds.routeSegments?.[ar]??null,...(a?{arr:a,arrAirportId:dbIds.airports?.[a]??null}:{})}:x);return recomputeAggregates(prev,newConns);});}}>{ddArrRoutes(c.track).map(r=><option key={r} value={r}>{r}</option>)}</select>
@@ -681,20 +702,58 @@ export default function SlotPlanner() {
           </div>
         )}
 
-        {selectedDep && (
+        {selectedEntity && (
           <div className="planner__cap-editor" onClick={e=>e.stopPropagation()}>
             <span className="planner__cap-editor-title">
-              Caps — airports: total slots · routes/tracks: per hour ×{setupData.departureHours}h = total
+              Caps — {selectedEntity.type === 'dep' ? `Departure: ${selectedEntity.id}` : selectedEntity.type === 'arr' ? `Arrival: ${selectedEntity.id}` : `${selectedEntity.type}: ${selectedEntity.id}`} · airports: total slots · routes/tracks: per hour ×{setupData.departureHours}h = total
             </span>
             <div className="planner__cap-grid">
-              {deps.filter(d=>d.id===selectedDep).map(d=>(
+              {selectedEntity?.type === 'dep' && deps.filter(d=>d.id===selectedEntity.id).map(d=>(
                 <React.Fragment key={d.id}>
                   <span className="planner__cap-key">Dep: {d.id} <em style={{fontWeight:400,color:'var(--text-muted)'}}>slots</em></span>
                   <input className="planner__cap-input" type="number" min={0} value={d.cap??''} placeholder="∞"
                     disabled={!isStaff} onChange={e=>setCap('deps',d.id,e.target.value)}/>
                 </React.Fragment>
               ))}
-              {[...new Set(selConnsAll.map(c=>c.depRoute))].sort().map(rId=>{
+              {selectedEntity?.type === 'arr' && arrs.filter(a=>a.id===selectedEntity.id).map(a=>(
+                <React.Fragment key={a.id}>
+                  <span className="planner__cap-key">Arr: {a.id} <em style={{fontWeight:400,color:'var(--text-muted)'}}>slots</em></span>
+                  <input className="planner__cap-input" type="number" min={0} value={a.cap??''} placeholder="∞"
+                    disabled={!isStaff} onChange={e=>setCap('arrs',a.id,e.target.value)}/>
+                </React.Fragment>
+              ))}
+              {selectedEntity?.type === 'track' && tracks.filter(t=>t.id===selectedEntity.id).map(t=>(
+                <React.Fragment key={t.id}>
+                  <span className="planner__cap-key" style={{color:t.col}}>Track: {t.id} <em style={{fontWeight:400,color:'var(--text-muted)'}}>/hr{t.cap!=null?` · ${t.cap} total`:''}</em></span>
+                  <input className="planner__cap-input" type="number" min={0} value={t.cap!=null?Math.round(t.cap/setupData.departureHours):''} placeholder="∞"
+                    disabled={!isStaff} onChange={e=>setCap('tracks',t.id,e.target.value)}/>
+                </React.Fragment>
+              ))}
+              {selectedEntity?.type === 'depRoute' && depRoutes.filter(r=>r.id===selectedEntity.id).map(r=>(
+                <React.Fragment key={r.id}>
+                  <span className="planner__cap-key">DepRoute: {r.id} <em style={{fontWeight:400,color:'var(--text-muted)'}}>/hr{r.cap!=null?` · ${r.cap} total`:''}</em></span>
+                  <input className="planner__cap-input" type="number" min={0} value={r.cap!=null?Math.round(r.cap/setupData.departureHours):''} placeholder="∞"
+                    disabled={!isStaff} onChange={e=>setCap('depRoutes',r.id,e.target.value)}/>
+                </React.Fragment>
+              ))}
+              {selectedEntity?.type === 'arrRoute' && arrRoutes.filter(r=>r.id===selectedEntity.id).map(r=>(
+                <React.Fragment key={r.id}>
+                  <span className="planner__cap-key">ArrRoute: {r.id} <em style={{fontWeight:400,color:'var(--text-muted)'}}>/hr{r.cap!=null?` · ${r.cap} total`:''}</em></span>
+                  <input className="planner__cap-input" type="number" min={0} value={r.cap!=null?Math.round(r.cap/setupData.departureHours):''} placeholder="∞"
+                    disabled={!isStaff} onChange={e=>setCap('arrRoutes',r.id,e.target.value)}/>
+                </React.Fragment>
+              ))}
+              {[...new Set(selConnsAll.map(c=>c.dep))].sort().filter(dId=>selectedEntity?.type!=='dep'||dId!==selectedEntity.id).map(dId=>{
+                const d=deps.find(x=>x.id===dId); if(!d) return null;
+                return (
+                  <React.Fragment key={d.id}>
+                    <span className="planner__cap-key">Dep: {d.id} <em style={{fontWeight:400,color:'var(--text-muted)'}}>slots</em></span>
+                    <input className="planner__cap-input" type="number" min={0} value={d.cap??''} placeholder="∞"
+                      disabled={!isStaff} onChange={e=>setCap('deps',d.id,e.target.value)}/>
+                  </React.Fragment>
+                );
+              })}
+              {[...new Set(selConnsAll.map(c=>c.depRoute))].sort().filter(rId=>selectedEntity?.type!=='depRoute'||rId!==selectedEntity.id).map(rId=>{
                 const r=depRoutes.find(x=>x.id===rId); if(!r) return null;
                 const perHr = r.cap!=null ? Math.round(r.cap/setupData.departureHours) : '';
                 return (
@@ -707,7 +766,7 @@ export default function SlotPlanner() {
                   </React.Fragment>
                 );
               })}
-              {[...new Set(selConnsAll.map(c=>c.track))].sort().map(tId=>{
+              {[...new Set(selConnsAll.map(c=>c.track))].sort().filter(tId=>selectedEntity?.type!=='track'||tId!==selectedEntity.id).map(tId=>{
                 const t=tracks.find(x=>x.id===tId); if(!t) return null;
                 const perHr = t.cap!=null ? Math.round(t.cap/setupData.departureHours) : '';
                 return (
@@ -720,7 +779,7 @@ export default function SlotPlanner() {
                   </React.Fragment>
                 );
               })}
-              {[...new Set(selConnsAll.map(c=>c.arrRoute))].sort().map(rId=>{
+              {[...new Set(selConnsAll.map(c=>c.arrRoute))].sort().filter(rId=>selectedEntity?.type!=='arrRoute'||rId!==selectedEntity.id).map(rId=>{
                 const r=arrRoutes.find(x=>x.id===rId); if(!r) return null;
                 const perHr = r.cap!=null ? Math.round(r.cap/setupData.departureHours) : '';
                 return (
@@ -733,7 +792,7 @@ export default function SlotPlanner() {
                   </React.Fragment>
                 );
               })}
-              {[...new Set(selConnsAll.map(c=>c.arr))].sort().map(aId=>{
+              {selectedEntity?.type !== 'arr' && [...new Set(selConnsAll.map(c=>c.arr))].sort().map(aId=>{
                 const a=arrs.find(x=>x.id===aId); if(!a) return null;
                 return (
                   <React.Fragment key={a.id}>
@@ -755,8 +814,8 @@ export default function SlotPlanner() {
         {/* Departure */}
         <div className="col planner__col">
           <div className="planner__header">Departure</div>
-          {vDeps.map(dep => { const isSel=selectedDep===dep.id; const dData=deps.find(d=>d.id===dep.id); return (
-            <div key={dep.id} className={`planner__cell planner__cell--dep${isSel?' planner__cell--selected':''}${!isSel&&selectedDep?' planner__cell--dimmed':''}`} style={{minHeight:maxRows*ROW_H/vDeps.length}} onClick={e=>{e.stopPropagation();setSelectedDep(isSel?null:dep.id);}}>
+          {vDeps.map(dep => { const isSel=selectedEntity?.type==='dep'&&selectedEntity?.id===dep.id; const dData=deps.find(d=>d.id===dep.id); return (
+            <div key={dep.id} className={`planner__cell planner__cell--dep${isSel?' planner__cell--selected':''}${!isSel&&selectedEntity?' planner__cell--dimmed':''}`} style={{minHeight:maxRows*ROW_H/vDeps.length}} onClick={e=>{e.stopPropagation();setSelectedEntity(isSel?null:{type:'dep',id:dep.id});}}>
               <div className="planner__cell-dep-info">
                 <span className="planner__cell-name">{dep.id}</span>
                 <TimeSpinner value={depTimes[dep.id] || ''} onChange={v => handleDepTimeChange(dep.id, v)} style={!isStaff?{pointerEvents:'none',opacity:.5}:{fontSize:'0.75rem'}}/>
@@ -772,8 +831,8 @@ export default function SlotPlanner() {
         {/* Dep Routes */}
         <div className="col planner__col planner__col--route">
           <div className="planner__header planner__header--center">Route</div>
-          {oDR.map(route => { const rc=selectedDep?selConnsAll.filter(c=>c.depRoute===route.id):[]; const opacity=!selectedDep?1:(rc.length>0?1:0.35); return (
-            <div key={route.id} className={`planner__route-row${route.disabled?' planner__route-row--disabled':''}`} style={{height:maxRows*ROW_H/oDR.length,opacity}} onClick={e=>e.stopPropagation()}>
+          {oDR.map(route => { const isSel=selectedEntity?.type==='depRoute'&&selectedEntity?.id===route.id; const rc=selConnsAll.filter(c=>c.depRoute===route.id); const opacity=!selectedEntity?1:(isSel?1:0.35); return (
+            <div key={route.id} className={`planner__route-row${route.disabled?' planner__route-row--disabled':''}${isSel?' planner__cell--selected':''}`} style={{height:maxRows*ROW_H/oDR.length,opacity}} onClick={e=>{e.stopPropagation();setSelectedEntity(isSel?null:{type:'depRoute',id:route.id});}}>
               <span className="planner__route-name">{route.id}{route.disabled&&<span className="planner__route-disabled-badge"> disabled</span>}</span>
               <div className="planner__route-right">
                 {rc.map(c=><span key={`${c.track}-${c.arrRoute}`} className={`planner__conn-label${isStaff?' planner__conn-label--rm':''}`} style={{background:trackCol(c.track)}} onClick={e=>{if(!isStaff)return;e.stopPropagation();removeConnection(c);}}>{connLabel(c)}</span>)}
@@ -786,13 +845,13 @@ export default function SlotPlanner() {
         {/* Track */}
         <div className="col planner__col">
           <div className="planner__header planner__header--center">Track</div>
-          {oTr.map(track => { const tc=selectedDep?selConnsAll.filter(c=>c.track===track.id):[]; const active=!selectedDep||filteredConns.some(c=>c.dep===selectedDep&&c.track===track.id); return (
-            <div key={track.id} className={`planner__cell planner__cell--track${track.disabled?' planner__cell--disabled':''}`} style={{minHeight:maxRows*ROW_H/oTr.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
+          {oTr.map(track => { const isSel=selectedEntity?.type==='track'&&selectedEntity?.id===track.id; const tc=selConnsAll.filter(c=>c.track===track.id); const active=!selectedEntity||isSel||tc.length>0; return (
+            <div key={track.id} className={`planner__cell planner__cell--track${track.disabled?' planner__cell--disabled':''}${isSel?' planner__cell--selected':''}`} style={{minHeight:maxRows*ROW_H/oTr.length,opacity:active?1:0.15}} onClick={e=>{e.stopPropagation();setSelectedEntity(isSel?null:{type:'track',id:track.id});}}>
               <div className="planner__track-main">
                 <span style={{fontWeight:700,fontSize:26,color:track.disabled?'var(--text-muted)':track.col,lineHeight:1}}>{track.id}{track.disabled&&<span className="planner__route-disabled-badge"> disabled</span>}</span>
                 <QuantityLabel used={liveSlots[track.id]||0} cap={track.cap} size="lg"/>
               </div>
-              {selectedDep&&tc.length>0&&(
+              {isSel&&tc.length>0&&(
                 <div className="planner__label-cluster planner__label-cluster--compact">
                   {tc.map(c=><span key={`${c.depRoute}-${c.arrRoute}`} className="planner__conn-label" style={{background:track.col}}>{connLabel(c)}</span>)}
                 </div>
@@ -804,8 +863,8 @@ export default function SlotPlanner() {
         {/* Arr Routes */}
         <div className="col planner__col planner__col--route">
           <div className="planner__header planner__header--center">Route</div>
-          {oAR.map(route => { const rc=selectedDep?selConnsAll.filter(c=>c.arrRoute===route.id):[]; const active=!selectedDep||filteredConns.some(c=>c.dep===selectedDep&&c.arrRoute===route.id); return (
-            <div key={route.id} className={`planner__route-row${route.disabled?' planner__route-row--disabled':''}`} style={{height:maxRows*ROW_H/oAR.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
+          {oAR.map(route => { const isSel=selectedEntity?.type==='arrRoute'&&selectedEntity?.id===route.id; const rc=selConnsAll.filter(c=>c.arrRoute===route.id); const active=!selectedEntity||isSel||rc.length>0; return (
+            <div key={route.id} className={`planner__route-row${route.disabled?' planner__route-row--disabled':''}${isSel?' planner__cell--selected':''}`} style={{height:maxRows*ROW_H/oAR.length,opacity:active?1:0.15}} onClick={e=>{e.stopPropagation();setSelectedEntity(isSel?null:{type:'arrRoute',id:route.id});}}>
               <span className="planner__route-name">{route.id}{route.disabled&&<span className="planner__route-disabled-badge"> disabled</span>}</span>
               <div className="planner__route-right">
                 {rc.map(c=><span key={`${c.track}-${c.depRoute}`} className={`planner__conn-label${isStaff?' planner__conn-label--rm':''}`} style={{background:trackCol(c.track)}} onClick={e=>{if(!isStaff)return;e.stopPropagation();removeConnection(c);}}>{connLabel(c)}</span>)}
@@ -818,10 +877,10 @@ export default function SlotPlanner() {
         {/* Arrival */}
         <div className="col planner__col">
           <div className="planner__header planner__header--right">Arrival</div>
-          {oArrs.map(arr => { const ac=selectedDep?selConnsAll.filter(c=>c.arr===arr.id):[]; const active=!selectedDep||filteredConns.some(c=>c.dep===selectedDep&&c.arr===arr.id); const aData=arrs.find(a=>a.id===arr.id); return (
-            <div key={arr.id} className="planner__cell planner__cell--right" style={{minHeight:maxRows*ROW_H/oArrs.length,opacity:active?1:0.15}} onClick={e=>e.stopPropagation()}>
+          {oArrs.map(arr => { const isSel=selectedEntity?.type==='arr'&&selectedEntity?.id===arr.id; const ac=selConnsAll.filter(c=>c.arr===arr.id); const active=!selectedEntity||isSel||ac.length>0; const aData=arrs.find(a=>a.id===arr.id); return (
+            <div key={arr.id} className={`planner__cell planner__cell--right${isSel?' planner__cell--selected':''}`} style={{minHeight:maxRows*ROW_H/oArrs.length,opacity:active?1:0.15}} onClick={e=>{e.stopPropagation();setSelectedEntity(isSel?null:{type:'arr',id:arr.id});}}>
               <QuantityLabel used={aData?.value??0} cap={aData?.cap} size="lg"/>
-              {selectedDep&&ac.map(c=><span key={`${c.track}-${c.depRoute}`} className="planner__conn-label" style={{background:trackCol(c.track)}}>{connLabel(c)}</span>)}
+              {isSel&&ac.map(c=><span key={`${c.track}-${c.depRoute}`} className="planner__conn-label" style={{background:trackCol(c.track)}}>{connLabel(c)}</span>)}
               <div className="planner__cell-arr-info">
                 <span className="planner__cell-name">{arr.id}</span>
                 {arrTimes[arr.id] && <TimeSpinner value={arrTimes[arr.id]} onChange={()=>{}} style={{pointerEvents:'none',opacity:.7,fontSize:'0.75rem'}}/>}
