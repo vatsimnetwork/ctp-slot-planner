@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 
-export default function CityPairTotalsPage({ data, setupData }) {
+export default function CityPairTotalsPage({ data, setupData, deferredPairs, onToggleDeferred }) {
   const { deps, depRoutesByDep, tracksByDepRoute, arrRoutesByTrack, arrByArrRoute, defaultCaps } = setupData;
 
   // Derive actual arrival airports from the route graph (setupData.arrs is ALL airports in the system)
@@ -81,6 +81,8 @@ export default function CityPairTotalsPage({ data, setupData }) {
   const slotsPct           = maxPossible > 0 ? Math.round((grandTotal / maxPossible) * 100) : 0;
   const pairsPct           = reachablePairs.size > 0 ? Math.round((numPairsWithSlots / reachablePairs.size) * 100) : 0;
 
+  const deferredCount = deferredPairs ? deferredPairs.size : 0;
+
   return (
     <div className="cpt">
       <div className="cpt__scroll-wrap">
@@ -88,8 +90,8 @@ export default function CityPairTotalsPage({ data, setupData }) {
           <thead>
             <tr>
               <th className="cpt__corner">
-                <span className="cpt__corner-dep">↓ Departure</span>
-                <span className="cpt__corner-arr">Arrival →</span>
+                <span className="cpt__corner-dep">&darr; Departure</span>
+                <span className="cpt__corner-arr">Arrival &rarr;</span>
               </th>
               {arrAirports.map(arr => (
                 <th key={arr} className="cpt__arr-head">{arr}</th>
@@ -111,14 +113,23 @@ export default function CityPairTotalsPage({ data, setupData }) {
                     const key      = `${dep}|${arr}`;
                     const possible = reachablePairs.has(key);
                     const val      = pairTotals[key] ?? 0;
+                    const isDeferred = deferredPairs && deferredPairs.has(key);
                     if (!possible) return <td key={arr} className="cpt__cell cpt__cell--impossible"></td>;
-                    if (val === 0) return <td key={arr} className="cpt__cell cpt__cell--zero">0</td>;
-                    return <td key={arr} className="cpt__cell cpt__cell--value">{val}</td>;
+                    return (
+                      <td key={arr}
+                        className={`cpt__cell ${val === 0 ? 'cpt__cell--zero' : 'cpt__cell--value'}${isDeferred ? ' cpt__cell--deferred' : ''}`}
+                        onClick={onToggleDeferred ? () => onToggleDeferred(key) : undefined}
+                        style={onToggleDeferred ? { cursor: 'pointer' } : undefined}
+                        title={isDeferred ? 'Deferred — departures pushed to end of window (click to un-defer)' : (onToggleDeferred ? 'Click to defer departures to end of window' : undefined)}
+                      >
+                        {val}{isDeferred ? ' D' : ''}
+                      </td>
+                    );
                   })}
                   <td className="cpt__summary-cell cpt__summary-cell--first">{depAssigned}</td>
-                  <td className="cpt__summary-cell">{depCap ?? '—'}</td>
+                  <td className="cpt__summary-cell">{depCap ?? '\u2014'}</td>
                   <td className={`cpt__summary-cell${depRemaining !== null && depRemaining < 0 ? ' cpt__summary-cell--over' : ''}`}>
-                    {depRemaining !== null ? depRemaining : '—'}
+                    {depRemaining !== null ? depRemaining : '\u2014'}
                   </td>
                 </tr>
               );
@@ -138,7 +149,7 @@ export default function CityPairTotalsPage({ data, setupData }) {
             <tr className="cpt__footer-row">
               <td className="cpt__footer-label">Capacity</td>
               {arrAirports.map(arr => (
-                <td key={arr} className="cpt__footer-cell">{defaultCaps.arrs[arr] ?? '—'}</td>
+                <td key={arr} className="cpt__footer-cell">{defaultCaps.arrs[arr] ?? '\u2014'}</td>
               ))}
             </tr>
             <tr className="cpt__footer-row">
@@ -149,7 +160,7 @@ export default function CityPairTotalsPage({ data, setupData }) {
                 const rem      = cap !== null ? cap - assigned : null;
                 return (
                   <td key={arr} className={`cpt__footer-cell${rem !== null && rem < 0 ? ' cpt__footer-cell--over' : ''}`}>
-                    {rem !== null ? rem : '—'}
+                    {rem !== null ? rem : '\u2014'}
                   </td>
                 );
               })}
@@ -182,6 +193,19 @@ export default function CityPairTotalsPage({ data, setupData }) {
               {avgRoutings.toFixed(1)} (highest: {maxRoutings})
             </span>
           </div>
+          {deferredCount > 0 && (
+            <div className="cpt__stats-row">
+              <span className="cpt__stats-label">Deferred airport pairs:</span>
+              <span className="cpt__stats-value">{deferredCount}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {onToggleDeferred && (
+        <div className="cpt__legend">
+          <span className="cpt__legend-swatch cpt__legend-swatch--deferred"></span>
+          <span className="cpt__legend-text">Deferred — departures for this pair are pushed to the end of the departure window. Click a cell to toggle.</span>
         </div>
       )}
     </div>

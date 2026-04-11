@@ -177,6 +177,16 @@ def simulate_slots(slot_groups: list = None, caps: dict = None, eid: int = None)
     return _post(f"/events/{eid or _EVENT}/simulate-slots", body)
 
 
+# ── Deferred departure pairs ─────────────────────────────────────────────────
+
+def get_deferred_departure_pairs(eid: int = None):
+    return _get(f"/events/{eid or _EVENT}/deferred-departure-pairs")
+
+
+def set_deferred_departure_pairs(pairs: list, eid: int = None):
+    return _put(f"/events/{eid or _EVENT}/deferred-departure-pairs", pairs)
+
+
 # ── Helpers: derive setup from route segments ─────────────────────────────────
 
 def derive_setup(route_segments: list, airports: list, departure_time_window_ns: int = 10800000000000) -> dict:

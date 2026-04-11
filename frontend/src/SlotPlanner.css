@@ -343,6 +343,11 @@
 .cpt__cell--impossible { background:rgba(239,68,68,.12); }
 .cpt__cell--zero { color:var(--text-faint); }
 .cpt__cell--value { font-weight:600; color:var(--text); }
+.cpt__cell--deferred { background:rgba(245,158,11,.18); border-left:3px solid #f59e0b; }
+
+.cpt__legend { display:flex; align-items:center; gap:8px; padding:8px 12px; margin-top:8px; font-size:.82rem; color:var(--text-muted); }
+.cpt__legend-swatch { display:inline-block; width:16px; height:16px; border-radius:3px; flex-shrink:0; }
+.cpt__legend-swatch--deferred { background:rgba(245,158,11,.18); border-left:3px solid #f59e0b; }
 
 /* Summary columns (Assigned / Capacity / Remaining) on right */
 .cpt__summary-head {

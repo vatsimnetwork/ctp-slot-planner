@@ -39,6 +39,7 @@ export default function SlotPlanner() {
   const [limitViolations, setLimitViolations] = useState([]);
   const [showLimitModal,  setShowLimitModal]  = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [deferredPairs, setDeferredPairs] = useState(new Set()); // Set of "EGLL|KJFK" strings
   const svgRef  = useRef(null);
   const gridRef = useRef(null);
   const editRef = useRef(null);
@@ -63,8 +64,9 @@ export default function SlotPlanner() {
     Promise.all([
       API.loadSetup().then(r => r.ok ? r.json() : Promise.reject(`Setup failed (${r.status})`)),
       API.loadSlots().then(r  => r.ok ? r.json() : Promise.reject(`Slots failed (${r.status})`)),
+      API.loadDeferredPairs().then(r => r.ok ? r.json() : []),
     ])
-    .then(([setup, raw]) => {
+    .then(([setup, raw, rawDeferredPairs]) => {
       setSetupData({
         deps:             setup.deps||[],
         depRoutesByDep:   setup.depRoutesByDep||{},
@@ -98,6 +100,20 @@ export default function SlotPlanner() {
         if (raw.routesRevision   != null) setSimVersion(raw.routesRevision);
         if (raw.plannerRevisions != null) setPlannerRevisions(raw.plannerRevisions);
       }
+      // Load deferred pairs: convert [[depDbId, arrDbId], ...] to "DEP|ARR" strings
+      if (Array.isArray(rawDeferredPairs) && rawDeferredPairs.length > 0) {
+        const dbIds = setup.dbIds || { airports: {} };
+        const identById = Object.fromEntries(
+          Object.entries(dbIds.airports).map(([ident, id]) => [id, ident])
+        );
+        setDeferredPairs(new Set(
+          rawDeferredPairs
+            .map(([d, a]) => { const di = identById[d], ai = identById[a]; return di && ai ? `${di}|${ai}` : null; })
+            .filter(Boolean)
+        ));
+      } else {
+        setDeferredPairs(new Set());
+      }
     })
     .catch(err => addToast(String(err), 'error'))
     .finally(() => setLoading(false));
@@ -117,20 +133,22 @@ export default function SlotPlanner() {
   const latestData      = useRef(data);
   latestData.current = data;
 
-  const buildPayload = useCallback((extras = {}) => ({
-    slotGroups: latestData.current.connections.map(c => ({
-      id:    `${c.dep}|${c.depRoute}|${c.track}|${c.arrRoute}|${c.arr}`,
-      value: c.value,
-      ...(c.depAirportId != null ? {
-        depAirportId: c.depAirportId,
-        depRouteId:   c.depRouteId,
-        trackId:      c.trackId,
-        arrRouteId:   c.arrRouteId,
-        arrAirportId: c.arrAirportId,
-      } : {}),
-    })),
-    ...extras,
-  }), []);
+  const buildPayload = useCallback((extras = {}) => {
+    return {
+      slotGroups: latestData.current.connections.map(c => ({
+        id:    `${c.dep}|${c.depRoute}|${c.track}|${c.arrRoute}|${c.arr}`,
+        value: c.value,
+        ...(c.depAirportId != null ? {
+          depAirportId: c.depAirportId,
+          depRouteId:   c.depRouteId,
+          trackId:      c.trackId,
+          arrRouteId:   c.arrRouteId,
+          arrAirportId: c.arrAirportId,
+        } : {}),
+      })),
+      ...extras,
+    };
+  }, []);
 
   const handleSave = () => {
     setSaving(true);
@@ -140,6 +158,19 @@ export default function SlotPlanner() {
       .catch(err => addToast(String(err), 'error'))
       .finally(() => setSaving(false));
   };
+
+  const toggleDeferredPair = useCallback((key) => {
+    setDeferredPairs(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      const dbIds = setupData.dbIds || { airports: {} };
+      const payload = [...next]
+        .map(k => { const [dep, arr] = k.split('|'); return [dbIds.airports[dep], dbIds.airports[arr]]; })
+        .filter(([d, a]) => d != null && a != null);
+      API.saveDeferredPairs(payload).catch(err => addToast(String(err), 'error'));
+      return next;
+    });
+  }, [setupData.dbIds, addToast]);
 
   // ── Tag / sector limit warnings ───────────────────────────────────────────
   const warnTimer = useRef(null);
@@ -633,7 +664,7 @@ export default function SlotPlanner() {
 
       {activeTab === 'throughputLimits' && <ThroughputLimitsPage isStaff={isRouteStaff} addToast={addToast} tagUsage={liveTagUsage} sectorUsage={liveSectorUsage} departureHours={setupData.departureHours} tagToRoutes={setupData.tagToRoutes} sectorToRoutes={setupData.sectorToRoutes} routeSlots={liveRouteSlots} routeList={setupData.routeList}/>}
 
-      {activeTab === 'cityPairTotals' && <CityPairTotalsPage data={data} setupData={setupData}/>}
+      {activeTab === 'cityPairTotals' && <CityPairTotalsPage data={data} setupData={setupData} deferredPairs={deferredPairs} onToggleDeferred={isStaff ? toggleDeferredPair : null}/>}
 
       {/* Control bar */}
       {activeTab === 'planner' && <div className="planner__control-bar" onClick={e=>e.stopPropagation()}>

@@ -268,6 +268,34 @@ def setup():
     })
 
 
+# ─── /deferred-departure-pairs/ ──────────────────────────────────────────────
+
+@app.get("/deferred-departure-pairs/")
+def get_deferred_departure_pairs():
+    auth.validate_session(request)
+    try:
+        pairs = ctp_api.get_deferred_departure_pairs()
+    except requests.HTTPError as e:
+        return _ext_error(e)
+    except requests.ConnectionError:
+        return jsonify({"error": "Cannot reach the CTP API"}), 502
+    return jsonify(pairs if pairs else [])
+
+
+@app.put("/deferred-departure-pairs/")
+def set_deferred_departure_pairs():
+    user = auth.validate_session(request)
+    _require_staff(user)
+    body = request.get_json(force=True)
+    try:
+        result = ctp_api.set_deferred_departure_pairs(body)
+    except requests.HTTPError as e:
+        return _ext_error(e)
+    except requests.ConnectionError:
+        return jsonify({"error": "Cannot reach the CTP API"}), 502
+    return jsonify(result if result else [])
+
+
 # ─── /slotgroups/ ─────────────────────────────────────────────────────────────
 
 @app.get("/slotgroups/")
