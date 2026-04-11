@@ -180,11 +180,11 @@ def simulate_slots(slot_groups: list = None, caps: dict = None, eid: int = None)
 # ── Deferred departure pairs ─────────────────────────────────────────────────
 
 def get_deferred_departure_pairs(eid: int = None):
-    return _get(f"/events/{eid or _EVENT}/deferred-departure-pairs")
+    return _get(f"/events/{eid or _EVENT}/departure-pair-preferences")
 
 
 def set_deferred_departure_pairs(pairs: list, eid: int = None):
-    return _put(f"/events/{eid or _EVENT}/deferred-departure-pairs", pairs)
+    return _put(f"/events/{eid or _EVENT}/departure-pair-preferences", pairs)
 
 
 # ── Helpers: derive setup from route segments ─────────────────────────────────

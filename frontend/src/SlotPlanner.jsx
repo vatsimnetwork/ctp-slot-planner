@@ -39,7 +39,7 @@ export default function SlotPlanner() {
   const [limitViolations, setLimitViolations] = useState([]);
   const [showLimitModal,  setShowLimitModal]  = useState(false);
   const [isDirty, setIsDirty] = useState(false);
-  const [deferredPairs, setDeferredPairs] = useState(new Set()); // Set of "EGLL|KJFK" strings
+  const [deferredPairs, setDeferredPairs] = useState(new Map()); // Map of "EGLL|KJFK" -> 0:none, 1:deferred, 2:preferred
   const svgRef  = useRef(null);
   const gridRef = useRef(null);
   const editRef = useRef(null);
@@ -100,20 +100,19 @@ export default function SlotPlanner() {
         if (raw.routesRevision   != null) setSimVersion(raw.routesRevision);
         if (raw.plannerRevisions != null) setPlannerRevisions(raw.plannerRevisions);
       }
-      // Load deferred pairs: convert [[depDbId, arrDbId], ...] to "DEP|ARR" strings
+      // Load departure pair preferences: convert [[depDbId, arrDbId, pref], ...] to Map of "DEP|ARR" -> pref
+      const newPrefs = new Map();
       if (Array.isArray(rawDeferredPairs) && rawDeferredPairs.length > 0) {
         const dbIds = setup.dbIds || { airports: {} };
         const identById = Object.fromEntries(
           Object.entries(dbIds.airports).map(([ident, id]) => [id, ident])
         );
-        setDeferredPairs(new Set(
-          rawDeferredPairs
-            .map(([d, a]) => { const di = identById[d], ai = identById[a]; return di && ai ? `${di}|${ai}` : null; })
-            .filter(Boolean)
-        ));
-      } else {
-        setDeferredPairs(new Set());
+        for (const [d, a, pref] of rawDeferredPairs) {
+          const di = identById[d], ai = identById[a];
+          if (di && ai) newPrefs.set(`${di}|${ai}`, pref ?? 1);
+        }
       }
+      setDeferredPairs(newPrefs);
     })
     .catch(err => addToast(String(err), 'error'))
     .finally(() => setLoading(false));
@@ -161,11 +160,17 @@ export default function SlotPlanner() {
 
   const toggleDeferredPair = useCallback((key) => {
     setDeferredPairs(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
+      const next = new Map(prev);
+      const current = next.get(key) ?? 0;
+      const nextPref = current === 2 ? 0 : current + 1; // cycle: 0 -> 1 -> 2 -> 0
+      if (nextPref === 0) {
+        next.delete(key);
+      } else {
+        next.set(key, nextPref);
+      }
       const dbIds = setupData.dbIds || { airports: {} };
       const payload = [...next]
-        .map(k => { const [dep, arr] = k.split('|'); return [dbIds.airports[dep], dbIds.airports[arr]]; })
+        .map(([k, pref]) => { const [dep, arr] = k.split('|'); return [dbIds.airports[dep], dbIds.airports[arr], pref]; })
         .filter(([d, a]) => d != null && a != null);
       API.saveDeferredPairs(payload).catch(err => addToast(String(err), 'error'));
       return next;

@@ -268,9 +268,9 @@ def setup():
     })
 
 
-# ─── /deferred-departure-pairs/ ──────────────────────────────────────────────
+# ─── /departure-pair-preferences/ ──────────────────────────────────────────────
 
-@app.get("/deferred-departure-pairs/")
+@app.get("/departure-pair-preferences/")
 def get_deferred_departure_pairs():
     auth.validate_session(request)
     try:
@@ -282,7 +282,7 @@ def get_deferred_departure_pairs():
     return jsonify(pairs if pairs else [])
 
 
-@app.put("/deferred-departure-pairs/")
+@app.put("/departure-pair-preferences/")
 def set_deferred_departure_pairs():
     user = auth.validate_session(request)
     _require_staff(user)

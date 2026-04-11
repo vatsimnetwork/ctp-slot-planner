@@ -1,9 +1,14 @@
 import React, { useMemo } from 'react';
 
+const PREF_NONE = 0;
+const PREF_DEFERRED = 1;
+const PREF_PREFERRED = 2;
+
+const PREF_LABEL = { [PREF_DEFERRED]: 'D', [PREF_PREFERRED]: 'P' };
+
 export default function CityPairTotalsPage({ data, setupData, deferredPairs, onToggleDeferred }) {
   const { deps, depRoutesByDep, tracksByDepRoute, arrRoutesByTrack, arrByArrRoute, defaultCaps } = setupData;
 
-  // Derive actual arrival airports from the route graph (setupData.arrs is ALL airports in the system)
   const arrAirports = useMemo(() =>
     [...new Set(Object.values(arrByArrRoute))].sort()
   , [arrByArrRoute]);
@@ -52,7 +57,6 @@ export default function CityPairTotalsPage({ data, setupData, deferredPairs, onT
 
   const grandTotal = useMemo(() => Object.values(pairTotals).reduce((a, b) => a + b, 0), [pairTotals]);
 
-  // ── Statistics ────────────────────────────────────────────────────────────
   const depCapTotal = useMemo(() =>
     deps.reduce((s, d) => s + (defaultCaps.deps[d] ?? 0), 0)
   , [deps, defaultCaps]);
@@ -81,7 +85,8 @@ export default function CityPairTotalsPage({ data, setupData, deferredPairs, onT
   const slotsPct           = maxPossible > 0 ? Math.round((grandTotal / maxPossible) * 100) : 0;
   const pairsPct           = reachablePairs.size > 0 ? Math.round((numPairsWithSlots / reachablePairs.size) * 100) : 0;
 
-  const deferredCount = deferredPairs ? deferredPairs.size : 0;
+  const deferredCount = deferredPairs ? [...deferredPairs.values()].filter(p => p === PREF_DEFERRED).length : 0;
+  const preferredCount = deferredPairs ? [...deferredPairs.values()].filter(p => p === PREF_PREFERRED).length : 0;
 
   return (
     <div className="cpt">
@@ -113,16 +118,27 @@ export default function CityPairTotalsPage({ data, setupData, deferredPairs, onT
                     const key      = `${dep}|${arr}`;
                     const possible = reachablePairs.has(key);
                     const val      = pairTotals[key] ?? 0;
-                    const isDeferred = deferredPairs && deferredPairs.has(key);
+                    const pref     = deferredPairs ? (deferredPairs.get(key) ?? PREF_NONE) : PREF_NONE;
                     if (!possible) return <td key={arr} className="cpt__cell cpt__cell--impossible"></td>;
+                    const isDeferred  = pref === PREF_DEFERRED;
+                    const isPreferred = pref === PREF_PREFERRED;
+                    let cellClass = `cpt__cell ${val === 0 ? 'cpt__cell--zero' : 'cpt__cell--value'}`;
+                    if (isDeferred)  cellClass += ' cpt__cell--deferred';
+                    if (isPreferred)  cellClass += ' cpt__cell--preferred';
+                    let title = '';
+                    if (onToggleDeferred) {
+                      if (pref === PREF_NONE)       title = 'Click to mark departures';
+                      else if (pref === PREF_DEFERRED)  title = 'Deferred — departures pushed to end of window (click to make preferred)';
+                      else if (pref === PREF_PREFERRED) title = 'Preferred — departures at start of window (click to clear)';
+                    }
                     return (
                       <td key={arr}
-                        className={`cpt__cell ${val === 0 ? 'cpt__cell--zero' : 'cpt__cell--value'}${isDeferred ? ' cpt__cell--deferred' : ''}`}
+                        className={cellClass}
                         onClick={onToggleDeferred ? () => onToggleDeferred(key) : undefined}
                         style={onToggleDeferred ? { cursor: 'pointer' } : undefined}
-                        title={isDeferred ? 'Deferred — departures pushed to end of window (click to un-defer)' : (onToggleDeferred ? 'Click to defer departures to end of window' : undefined)}
+                        title={title}
                       >
-                        {val}{isDeferred ? ' D' : ''}
+                        {val}{PREF_LABEL[pref] || ''}
                       </td>
                     );
                   })}
@@ -193,10 +209,14 @@ export default function CityPairTotalsPage({ data, setupData, deferredPairs, onT
               {avgRoutings.toFixed(1)} (highest: {maxRoutings})
             </span>
           </div>
-          {deferredCount > 0 && (
+          {(deferredCount > 0 || preferredCount > 0) && (
             <div className="cpt__stats-row">
-              <span className="cpt__stats-label">Deferred airport pairs:</span>
-              <span className="cpt__stats-value">{deferredCount}</span>
+              <span className="cpt__stats-label">Departure preferences:</span>
+              <span className="cpt__stats-value">
+                {deferredCount > 0 && <span>Deferred: {deferredCount}</span>}
+                {deferredCount > 0 && preferredCount > 0 && <span> · </span>}
+                {preferredCount > 0 && <span>Preferred: {preferredCount}</span>}
+              </span>
             </div>
           )}
         </div>
@@ -205,7 +225,12 @@ export default function CityPairTotalsPage({ data, setupData, deferredPairs, onT
       {onToggleDeferred && (
         <div className="cpt__legend">
           <span className="cpt__legend-swatch cpt__legend-swatch--deferred"></span>
-          <span className="cpt__legend-text">Deferred — departures for this pair are pushed to the end of the departure window. Click a cell to toggle.</span>
+          <span className="cpt__legend-text">Deferred — pushed to end of window</span>
+          <span className="cpt__legend-sep">·</span>
+          <span className="cpt__legend-swatch cpt__legend-swatch--preferred"></span>
+          <span className="cpt__legend-text">Preferred — at start of window</span>
+          <span className="cpt__legend-sep">·</span>
+          <span className="cpt__legend-text">Click cell to cycle: none → deferred → preferred → none</span>
         </div>
       )}
     </div>
