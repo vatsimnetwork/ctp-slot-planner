@@ -153,6 +153,14 @@ def add_slots_to_revision(revision_id: int, slots: list):
     return _post(f"/slot-revisions/{revision_id}/slots", slots)
 
 
+def get_draft_entries(revision_id: int):
+    return _get(f"/slot-revisions/{revision_id}/draft-entries")
+
+
+def add_draft_entries(revision_id: int, entries: list):
+    return _post(f"/slot-revisions/{revision_id}/draft-entries", entries)
+
+
 # ── Route revisions ───────────────────────────────────────────────────────────
 
 def get_latest_route_revision():
@@ -168,13 +176,8 @@ def calculate_slots(eid: int = None):
     return _post(f"/events/{eid or _EVENT}/calculate-slots", {})
 
 
-def simulate_slots(slot_groups: list = None, caps: dict = None, eid: int = None):
-    body = {}
-    if slot_groups is not None:
-        body["slotGroups"] = slot_groups
-    if caps is not None:
-        body["caps"] = caps
-    return _post(f"/events/{eid or _EVENT}/simulate-slots", body)
+def simulate_slots(eid: int = None):
+    return _post(f"/events/{eid or _EVENT}/simulate-slots", {})
 
 
 # ── Deferred departure pairs ─────────────────────────────────────────────────
