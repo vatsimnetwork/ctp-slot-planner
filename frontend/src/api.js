@@ -17,6 +17,6 @@ export const API = {
   syncTime:             (v) => apiFetch('/synctime/',             { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: v }) }),
   loadThroughputLimits: () => apiFetch('/throughput-limits/'),
   saveThroughputLimits: (p) => apiFetch('/throughput-limits/',    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
-  loadDeferredPairs:    () => apiFetch('/departure-pair-preferences/'),
-  saveDeferredPairs:    (p) => apiFetch('/departure-pair-preferences/', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
+  loadWindowShifts:     () => apiFetch('/window-shifts/'),
+  saveWindowShifts:     (p) => apiFetch('/window-shifts/',    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }),
 };

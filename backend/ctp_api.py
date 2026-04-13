@@ -180,14 +180,14 @@ def simulate_slots(eid: int = None):
     return _post(f"/events/{eid or _EVENT}/simulate-slots", {})
 
 
-# ── Deferred departure pairs ─────────────────────────────────────────────────
+# ── Window shifts ─────────────────────────────────────────────────────────────
 
-def get_deferred_departure_pairs(eid: int = None):
-    return _get(f"/events/{eid or _EVENT}/departure-pair-preferences")
+def list_window_shifts(revision_id: int):
+    return _get(f"/slot-revisions/{revision_id}/window-shifts")
 
 
-def set_deferred_departure_pairs(pairs: list, eid: int = None):
-    return _put(f"/events/{eid or _EVENT}/departure-pair-preferences", pairs)
+def put_window_shifts(revision_id: int, shifts: list):
+    return _put(f"/slot-revisions/{revision_id}/window-shifts", shifts)
 
 
 # ── Helpers: derive setup from route segments ─────────────────────────────────

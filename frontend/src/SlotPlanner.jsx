@@ -20,7 +20,7 @@ export default function SlotPlanner() {
   const [saving,  setSaving]  = useState(false);
   const [simStatus, setSimStatus] = useState(null); // null | 'running' | 'sim_responded' | 'saved'
   const [activeTab, setActiveTab] = useState('planner');
-  const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[], tracksByDepRoute:{}, arrRoutesByTrack:{}, arrByArrRoute:{}, dbIds:{airports:{},routeSegments:{}}, departureHours:3, defaultCaps:{deps:{},depRoutes:{},tracks:{},arrRoutes:{},arrs:{}}, tagMap:{}, sectorMap:{}, tagLimits:[], sectorLimits:[], tagToRoutes:{}, sectorToRoutes:{}, disabledRoutes:[], routeList:[] });
+  const [setupData, setSetupData] = useState({ deps:[], depRoutesByDep:{}, tracks:[], arrRoutes:[], arrs:[], tracksByDepRoute:{}, arrRoutesByTrack:{}, arrByArrRoute:{}, dbIds:{airports:{},routeSegments:{}}, departureHours:3, departureTimeWindowHours:3, defaultCaps:{deps:{},depRoutes:{},tracks:{},arrRoutes:{},arrs:{}}, tagMap:{}, sectorMap:{}, tagLimits:[], sectorLimits:[], tagToRoutes:{}, sectorToRoutes:{}, disabledRoutes:[], routeList:[] });
   const [simVersion,       setSimVersion]       = useState(null);
   const [plannerRevisions, setPlannerRevisions] = useState(0);
   const [selectedEntity, setSelectedEntity] = useState(null);
@@ -39,7 +39,7 @@ export default function SlotPlanner() {
   const [limitViolations, setLimitViolations] = useState([]);
   const [showLimitModal,  setShowLimitModal]  = useState(false);
   const [isDirty, setIsDirty] = useState(false);
-  const [deferredPairs, setDeferredPairs] = useState(new Map()); // Map of "EGLL|KJFK" -> 0:none, 1:deferred, 2:preferred
+  const [airportWindowShifts, setAirportWindowShifts] = useState(new Map()); // Map of "DEP|ARR" -> { startShift, endShift }
   const svgRef  = useRef(null);
   const gridRef = useRef(null);
   const editRef = useRef(null);
@@ -64,9 +64,9 @@ export default function SlotPlanner() {
     Promise.all([
       API.loadSetup().then(r => r.ok ? r.json() : Promise.reject(`Setup failed (${r.status})`)),
       API.loadSlots().then(r  => r.ok ? r.json() : Promise.reject(`Slots failed (${r.status})`)),
-      API.loadDeferredPairs().then(r => r.ok ? r.json() : []),
+      API.loadWindowShifts().then(r => r.ok ? r.json() : []),
     ])
-    .then(([setup, raw, rawDeferredPairs]) => {
+    .then(([setup, raw, rawWindowShifts]) => {
       setSetupData({
         deps:             setup.deps||[],
         depRoutesByDep:   setup.depRoutesByDep||{},
@@ -87,6 +87,7 @@ export default function SlotPlanner() {
         sectorToRoutes:   setup.sectorToRoutes||{},
         disabledRoutes:   setup.disabledRoutes||[],
         routeList:        setup.routeList||[],
+        departureTimeWindowHours: setup.departureTimeWindowHours ?? setup.departureHours ?? 3,
       });
       setIsStaff(setup.isStaff ?? false);
       setIsRouteStaff(setup.isRouteStaff ?? false);
@@ -100,19 +101,23 @@ export default function SlotPlanner() {
         if (raw.routesRevision   != null) setSimVersion(raw.routesRevision);
         if (raw.plannerRevisions != null) setPlannerRevisions(raw.plannerRevisions);
       }
-      // Load departure pair preferences: convert [[depDbId, arrDbId, pref], ...] to Map of "DEP|ARR" -> pref
-      const newPrefs = new Map();
-      if (Array.isArray(rawDeferredPairs) && rawDeferredPairs.length > 0) {
+      // Load window shifts: convert [{departureAirportId, arrivalAirportId, startShiftHours, endShiftHours, ...}] to Map of "DEP|ARR" -> { startShift, endShift }
+      const newShifts = new Map();
+      if (Array.isArray(rawWindowShifts) && rawWindowShifts.length > 0) {
         const dbIds = setup.dbIds || { airports: {} };
         const identById = Object.fromEntries(
           Object.entries(dbIds.airports).map(([ident, id]) => [id, ident])
         );
-        for (const [d, a, pref] of rawDeferredPairs) {
-          const di = identById[d], ai = identById[a];
-          if (di && ai) newPrefs.set(`${di}|${ai}`, pref ?? 1);
+        for (const s of rawWindowShifts) {
+          const depId = s.departureAirportId ?? s.departureAirport?.id;
+          const arrId = s.arrivalAirportId ?? s.arrivalAirport?.id;
+          const di = identById[depId], ai = identById[arrId];
+          if (di && ai) {
+            newShifts.set(`${di}|${ai}`, { startShift: s.startShiftHours ?? 0, endShift: s.endShiftHours ?? 0 });
+          }
         }
       }
-      setDeferredPairs(newPrefs);
+      setAirportWindowShifts(newShifts);
     })
     .catch(err => addToast(String(err), 'error'))
     .finally(() => setLoading(false));
@@ -158,21 +163,32 @@ export default function SlotPlanner() {
       .finally(() => setSaving(false));
   };
 
-  const toggleDeferredPair = useCallback((key) => {
-    setDeferredPairs(prev => {
+  const saveShiftsTimer = useRef(null);
+  const updatePairShift = useCallback((key, shift) => {
+    setAirportWindowShifts(prev => {
       const next = new Map(prev);
-      const current = next.get(key) ?? 0;
-      const nextPref = current === 2 ? 0 : current + 1; // cycle: 0 -> 1 -> 2 -> 0
-      if (nextPref === 0) {
+      if (!shift || (shift.startShift === 0 && shift.endShift === 0)) {
         next.delete(key);
       } else {
-        next.set(key, nextPref);
+        next.set(key, shift);
       }
-      const dbIds = setupData.dbIds || { airports: {} };
-      const payload = [...next]
-        .map(([k, pref]) => { const [dep, arr] = k.split('|'); return [dbIds.airports[dep], dbIds.airports[arr], pref]; })
-        .filter(([d, a]) => d != null && a != null);
-      API.saveDeferredPairs(payload).catch(err => addToast(String(err), 'error'));
+      // Debounced save
+      if (saveShiftsTimer.current) clearTimeout(saveShiftsTimer.current);
+      saveShiftsTimer.current = setTimeout(() => {
+        const dbIds = setupData.dbIds || { airports: {} };
+        const payload = [...next]
+          .map(([k, s]) => {
+            const [dep, arr] = k.split('|');
+            return {
+              departureAirportId: dbIds.airports[dep],
+              arrivalAirportId: dbIds.airports[arr],
+              startShiftHours: s.startShift,
+              endShiftHours: s.endShift,
+            };
+          })
+          .filter(e => e.departureAirportId != null && e.arrivalAirportId != null);
+        API.saveWindowShifts(payload).catch(err => addToast(String(err), 'error'));
+      }, 500);
       return next;
     });
   }, [setupData.dbIds, addToast]);
@@ -669,7 +685,7 @@ export default function SlotPlanner() {
 
       {activeTab === 'throughputLimits' && <ThroughputLimitsPage isStaff={isRouteStaff} addToast={addToast} tagUsage={liveTagUsage} sectorUsage={liveSectorUsage} departureHours={setupData.departureHours} tagToRoutes={setupData.tagToRoutes} sectorToRoutes={setupData.sectorToRoutes} routeSlots={liveRouteSlots} routeList={setupData.routeList}/>}
 
-      {activeTab === 'cityPairTotals' && <CityPairTotalsPage data={data} setupData={setupData} deferredPairs={deferredPairs} onToggleDeferred={isStaff ? toggleDeferredPair : null}/>}
+      {activeTab === 'cityPairTotals' && <CityPairTotalsPage data={data} setupData={setupData} airportWindowShifts={airportWindowShifts} updatePairShift={isStaff ? updatePairShift : null} departureTimeWindowHours={setupData.departureTimeWindowHours ?? setupData.departureHours ?? 3}/>}
 
       {/* Control bar */}
       {activeTab === 'planner' && <div className="planner__control-bar" onClick={e=>e.stopPropagation()}>

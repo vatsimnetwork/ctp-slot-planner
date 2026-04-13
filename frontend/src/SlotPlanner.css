@@ -305,6 +305,8 @@
 
 /* ── City Pair Totals page ── */
 .cpt { padding:24px 28px; }
+.cpt__layout { display:flex; gap:24px; align-items:flex-start; }
+.cpt__table-side { flex:1; min-width:0; overflow:hidden; }
 .cpt__scroll-wrap { overflow-x:auto; }
 
 .cpt__table { border-collapse:collapse; font-size:13px; white-space:nowrap; }
@@ -343,14 +345,30 @@
 .cpt__cell--impossible { background:rgba(239,68,68,.12); }
 .cpt__cell--zero { color:var(--text-faint); }
 .cpt__cell--value { font-weight:600; color:var(--text); }
-.cpt__cell--deferred  { background:rgba(245,158,11,.18); border-left:3px solid #f59e0b; }
-.cpt__cell--preferred { background:rgba(34,197,94,.18);  border-left:3px solid #22c55e;  }
+.cpt__cell--selected { outline:2px solid var(--accent); outline-offset:-2px; background:var(--accent-subtle); }
 
-.cpt__legend { display:flex; align-items:center; gap:8px; padding:8px 12px; margin-top:8px; font-size:.82rem; color:var(--text-muted); }
-.cpt__legend-swatch { display:inline-block; width:16px; height:16px; border-radius:3px; flex-shrink:0; }
-.cpt__legend-swatch--deferred  { background:rgba(245,158,11,.18); border-left:3px solid #f59e0b; }
-.cpt__legend-swatch--preferred { background:rgba(34,197,94,.18);  border-left:3px solid #22c55e;  }
-.cpt__legend-sep { color:var(--text-faint); margin:0 4px; }
+/* Red triangle marker for shifted pairs */
+.cpt__cell-marker {
+  position:absolute; top:0; right:0; width:0; height:0;
+  border-top:6px solid #ef4444; border-left:6px solid transparent;
+}
+
+/* Editor panel docked on right */
+.cpt__editor-panel {
+  flex-shrink:0; width:480px;
+  border:1px solid var(--border); border-radius:8px;
+  background:var(--bg); padding:16px;
+  position:sticky; top:24px;
+}
+.cpt__editor-panel-header {
+  display:flex; justify-content:space-between; align-items:center;
+  margin-bottom:12px; font-size:14px;
+}
+.cpt__editor-close {
+  background:none; border:none; cursor:pointer; font-size:16px;
+  color:var(--text-muted); padding:2px 6px; border-radius:4px;
+}
+.cpt__editor-close:hover { background:var(--bg-secondary); color:var(--text); }
 
 /* Summary columns (Assigned / Capacity / Remaining) on right */
 .cpt__summary-head {

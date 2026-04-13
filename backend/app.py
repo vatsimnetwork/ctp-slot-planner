@@ -1,5 +1,4 @@
 import os
-import json
 import re
 import sys
 import requests
@@ -142,10 +141,6 @@ def setup():
                 entries = ctp_api.get_draft_entries(latest["id"])
             except Exception:
                 pass
-            if not entries:
-                sg = _parse_commentary(latest.get("slotPlannerDraftCommentary", ""))
-                if sg:
-                    entries = sg.get("slotGroups", [])
             if entries:
                 rs_ident_by_id = {
                     seg["id"]: (seg.get("identifier") or "").strip()
@@ -258,6 +253,7 @@ def setup():
     return jsonify({
         **derived,
         "routesRevision": routes_revision,
+        "departureTimeWindowHours": derived.get("departureHours", 3),
         "isStaff": is_staff,
         "isRouteStaff": is_route_staff,
         "syncTime": _from_api_time(event.get("departureTimeWindowOffsetSynchronizationTimeOfDay", "16:00:00")) if event else "1600z",
@@ -276,32 +272,38 @@ def setup():
     })
 
 
-# ─── /departure-pair-preferences/ ──────────────────────────────────────────────
+# ─── /window-shifts/ ───────────────────────────────────────────────────────────
 
-@app.get("/departure-pair-preferences/")
-def get_deferred_departure_pairs():
+@app.get("/window-shifts/")
+def get_window_shifts():
     auth.validate_session(request)
     try:
-        pairs = ctp_api.get_deferred_departure_pairs()
+        latest = ctp_api.get_latest_slot_revision()
+        if not latest:
+            return jsonify([])
+        shifts = ctp_api.list_window_shifts(latest["id"])
     except requests.HTTPError as e:
         return _ext_error(e)
     except requests.ConnectionError:
         return jsonify({"error": "Cannot reach the CTP API"}), 502
-    return jsonify(pairs if pairs else [])
+    return jsonify(shifts if shifts else [])
 
 
-@app.put("/departure-pair-preferences/")
-def set_deferred_departure_pairs():
+@app.put("/window-shifts/")
+def put_window_shifts():
     user = auth.validate_session(request)
     _require_staff(user)
     body = request.get_json(force=True)
     try:
-        result = ctp_api.set_deferred_departure_pairs(body)
+        latest = ctp_api.get_latest_slot_revision()
+        if not latest:
+            return jsonify({"error": "No slot revision exists"}), 404
+        result = ctp_api.put_window_shifts(latest["id"], body)
     except requests.HTTPError as e:
         return _ext_error(e)
     except requests.ConnectionError:
         return jsonify({"error": "Cannot reach the CTP API"}), 502
-    return jsonify(result if result else [])
+    return jsonify(result)
 
 
 # ─── /slotgroups/ ─────────────────────────────────────────────────────────────
@@ -336,18 +338,6 @@ def get_slotgroups():
                 route_segments, airports = [], []
             airport_ident_by_id, rs_ident_by_id = _build_ident_lookups(route_segments, airports)
             slot_groups = _id_groups_to_ident_groups(entries, airport_ident_by_id, rs_ident_by_id)
-        else:
-            draft = _parse_commentary(latest.get("slotPlannerDraftCommentary", ""))
-            if draft:
-                raw_groups = draft.get("slotGroups", [])
-                if raw_groups and "depAirportId" in raw_groups[0]:
-                    try:
-                        route_segments = ctp_api.get_route_segments()
-                        airports = ctp_api.get_airports()
-                    except Exception:
-                        route_segments, airports = [], []
-                    airport_ident_by_id, rs_ident_by_id = _build_ident_lookups(route_segments, airports)
-                    slot_groups = _id_groups_to_ident_groups(raw_groups, airport_ident_by_id, rs_ident_by_id)
 
     return jsonify({
         "slotGroups":       slot_groups,
@@ -417,7 +407,7 @@ def submit_slotgroups():
 
     # The Go API stores these as int enums (iota); the frontend sends the string names.
     _SLOT_GENERATION_MODE = {"Random": 0, "MaximizeAirportPairs": 1, "MaximizeSlots": 2}
-    _DTW_OFFSETS_MODE     = {"None": 0, "EarliestRoutes": 1, "LatestRoutes": 2, "RouteAverage": 3}
+    _DTW_OFFSETS_MODE     = {"None": 0, "CalculateSlotTimingsOnly": 1, "EarliestRoutes": 2, "LatestRoutes": 3, "RouteAverage": 4}
     _WAYPOINT_TP_MODE     = {"None": 0, "FirstWaypointsOfNATRouteSegmentsOnly": 1, "AllWaypoints": 2}
 
     def _coerce(key, raw):
@@ -658,14 +648,6 @@ def health():
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
-
-def _parse_commentary(raw: str):
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except Exception:
-        return None
 
 
 def _build_ident_lookups(route_segments: list, airports: list):
