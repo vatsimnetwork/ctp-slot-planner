@@ -43,6 +43,7 @@ export default function SimParamsModal({ mode, params, onParamsChange, onConfirm
           <label className="modal-row"><span className="modal-label">Offset Calculation Mode</span>
             <select className="modal-select" value={params.IntendedDepartureTimeWindowOffsetsCalculationMode} onChange={e => set('IntendedDepartureTimeWindowOffsetsCalculationMode', e.target.value)}>
               <option value="None">None</option>
+              <option value="CalculateSlotTimingsOnly">Calculate Slot Timings Only</option>
               <option value="EarliestRoutes">Earliest Routes</option>
               <option value="LatestRoutes">Latest Routes</option>
               <option value="RouteAverage">Route Average</option>

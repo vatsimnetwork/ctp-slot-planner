@@ -226,7 +226,7 @@ def setup():
                 arr_times[icao] = spinner_val
 
     _SLOT_GEN_MODE_NAMES     = {0: "Random", 1: "MaximizeAirportPairs", 2: "MaximizeSlots"}
-    _DTW_OFFSETS_MODE_NAMES  = {0: "None", 1: "EarliestRoutes", 2: "LatestRoutes", 3: "RouteAverage"}
+    _DTW_OFFSETS_MODE_NAMES  = {0: "None", 1: "CalculateSlotTimingsOnly", 2: "EarliestRoutes", 3: "LatestRoutes", 4: "RouteAverage"}
     _WAYPOINT_TP_MODE_NAMES  = {0: "None", 1: "FirstWaypointsOfNATRouteSegmentsOnly", 2: "AllWaypoints"}
 
     calc_params = {}
@@ -236,7 +236,7 @@ def setup():
             "DepartureTimeWindowOffsetSynchronizationLongitude":     event.get("departureTimeWindowOffsetSynchronizationLongitude", -30),
             "SimulationAnalysisResolutionInMinutes":                 event.get("simulationAnalysisResolutionInMinutes", 2),
             "ShouldSimulationUseActualWeatherForecastData":          event.get("shouldSimulationUseActualWeatherForecastData", False),
-            "IntendedDepartureTimeWindowOffsetsCalculationMode":     _DTW_OFFSETS_MODE_NAMES.get(event.get("intendedDepartureTimeWindowOffsetsCalculationMode", 1), "EarliestRoutes"),
+            "IntendedDepartureTimeWindowOffsetsCalculationMode":     _DTW_OFFSETS_MODE_NAMES.get(event.get("intendedDepartureTimeWindowOffsetsCalculationMode", 2), "EarliestRoutes"),
             "DepartureTimeWindowOffsetSynchronizationTimeOfDay":     _from_api_time(event.get("departureTimeWindowOffsetSynchronizationTimeOfDay", "16:00:00")),
             "CalculateThroughputDataOnlyForManuallyProvidedSectors": event.get("calculateThroughputDataOnlyForManuallyProvidedSectors", True),
             "IntendedWaypointThroughputCalculationMode":             _WAYPOINT_TP_MODE_NAMES.get(event.get("intendedWaypointThroughputCalculationMode", 1), "FirstWaypointsOfNATRouteSegmentsOnly"),
